@@ -41,6 +41,17 @@ class CallgrindParser {
     std::vector<SubPosition> sub_positions;
   };
 
+  struct Entry;
+
+  struct Call {
+    Call(unsigned int ncalls, std::vector<SubPosition> sub_positions, std::shared_ptr<Entry> entry)
+        : ncalls(ncalls), sub_positions(std::move(sub_positions)), entry(std::move(entry)) {}
+
+    unsigned int ncalls;
+    std::vector<SubPosition> sub_positions;
+    std::shared_ptr<Entry> entry;
+  };
+
   struct Entry {
     /* The ELF object where the cost of next cost lines happens. */
     std::string ob;
@@ -53,25 +64,22 @@ class CallgrindParser {
     std::string fe;
 
     std::vector<CostSpec> costs;
+    std::vector<Call> calls;
 
     void addCost(const CostSpec &spec) { costs.emplace_back(spec); }
+    void addCall(Call &&call) { calls.emplace_back(call); }
     void setPosition(const PositionSpec &spec) {
       if (spec.name == "ob") {
         ob = spec.value;
-      }
-      else if (spec.name == "fl") {
+      } else if (spec.name == "fl") {
         fl = spec.value;
-      }
-      else if (spec.name == "fn") {
+      } else if (spec.name == "fn") {
         fn = spec.value;
-      }
-      else if (spec.name == "fi") {
+      } else if (spec.name == "fi") {
         fi = spec.value;
-      }
-      else if (spec.name == "fe") {
+      } else if (spec.name == "fe") {
         fe = spec.value;
-      }
-      else {
+      } else {
         throw std::runtime_error("Unknown spec: " + spec.name);
       }
     }
@@ -95,11 +103,12 @@ class CallgrindParser {
 
       std::smatch match_results;
       /* parse position specs */
-      if (std::optional<PositionSpec> cost_position; bool(cost_position = parsePositionLine(line, PositionType::Cost))) {
+      if (std::optional<PositionSpec> cost_position; bool(
+          cost_position = parsePositionLine(line, PositionType::Cost))) {
         if (!current_entry) {
           current_entry = newEntry();
         }
-        costs_target = current_entry.get();
+        costs_target = current_entry;
         current_entry->setPosition(*cost_position);
 
         if (cost_position->name == "fl") {
@@ -108,21 +117,27 @@ class CallgrindParser {
           current_ob = cost_position->value;
         }
         std::cout << line << std::endl;
-      } else if (std::optional<CostSpec> cost; costs_target && bool(cost = parseCostLine(line))) {
-        current_entry->addCost(*cost);
+      }
+        /* add costs */
+      else if (std::optional<CostSpec> cost; costs_target && bool(cost = parseCostLine(line))) {
+        costs_target->addCost(*cost);
         std::cout << line << std::endl;
-      } else if (std::optional<PositionSpec> call_position; bool(call_position = parsePositionLine(line,
-                                                                                                   PositionType::Call))) {
+      }
+        /* add new call position spec */
+      else if (std::optional<PositionSpec> call_position; bool(call_position = parsePositionLine(line,
+                                                                                                 PositionType::Call))) {
         if (!current_call_entry) {
           current_call_entry = newEntry();
         }
-        costs_target = current_call_entry.get();
         current_call_entry->setPosition(*call_position);
         std::cout << line << std::endl;
       } else if (std::optional<CallSpec> call_spec; current_call_entry && bool(call_spec = parseCallLine(line))) {
-
+        current_entry->addCall(Call(call_spec->ncalls, call_spec->sub_positions, current_call_entry));
+        costs_target = current_call_entry;
         std::cout << line << std::endl;
-      } else if (std::regex_search(line, match_results, re_positions_def)) {
+      }
+        /* header */
+      else if (std::regex_search(line, match_results, re_positions_def)) {
         for (size_t im = 1; im < match_results.size(); ++im) {
           positions_def.emplace_back(match_results.str(im)); // TODO trim
         }
@@ -134,7 +149,13 @@ class CallgrindParser {
         }
         std::cout << line << std::endl;
       } else if (parseEmptyLine(line)) {
-        std::cout << line << std::endl;
+        if (current_entry) {
+          entries.emplace_back(current_entry);
+        }
+
+        current_entry.reset();
+        current_call_entry.reset();
+        costs_target.reset();
       } else {
         std::cerr << line_number << ": " << line << std::endl;
       }
@@ -196,8 +217,8 @@ class CallgrindParser {
                                                                                                    - 2)) : -1;
       bool has_specified_name = match_results[3].matched;
       auto position_name = has_specified_name ?
-           match_results.str(3) :
-           position_cache.find(std::make_pair(position, compression_index))->second;
+                           match_results.str(3) :
+                           position_cache.find(std::make_pair(position, compression_index))->second;
       if (compression_index >= 0 && has_specified_name) {
         position_cache.emplace(std::make_pair(position, compression_index), position_name);
       }
@@ -271,11 +292,15 @@ class CallgrindParser {
     return {};
   }
 
-  std::unique_ptr<Entry> newEntry() {
-    auto result = std::make_unique<Entry>();
+  std::shared_ptr<Entry> newEntry() {
+    auto result = std::make_shared<Entry>();
     result->fl = current_fl;
     result->ob = current_ob;
     return result;
+  }
+
+  void newState(State new_state) {
+
   }
 
   std::string current_line;
@@ -291,9 +316,10 @@ class CallgrindParser {
 
   std::string filename;
 
-  std::unique_ptr<Entry> current_entry{nullptr};
-  std::unique_ptr<Entry> current_call_entry{nullptr};
-  Entry *costs_target = nullptr;
+  std::shared_ptr<Entry> current_entry{nullptr};
+  std::shared_ptr<Entry> current_call_entry{nullptr};
+  std::shared_ptr<Entry> costs_target{nullptr};
+  std::vector<std::shared_ptr<Entry>> entries;
 
 };
 
