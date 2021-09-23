@@ -18,7 +18,7 @@ class CallgrindParser {
   using Cost = uint64_t;
 
   enum class PositionType {
-    Cost, Call
+    Cost, Call, FiFe
   };
 
   enum class State {
@@ -26,6 +26,7 @@ class CallgrindParser {
     PositionDef,
     CostsDef,
     CallPositionDef,
+    CallDef,
   };
 
   struct PositionSpec {
@@ -59,6 +60,8 @@ class CallgrindParser {
     std::vector<SubPosition> sub_positions;
     std::vector<CostSpec> costs;
     std::shared_ptr<Entry> entry;
+
+    void addCost(const CostSpec &spec) { costs.emplace_back(spec); }
   };
 
   struct Position {
@@ -112,24 +115,28 @@ class CallgrindParser {
     void addCost(const CostSpec &spec) { costs.emplace_back(spec); }
     void addCall(Call &&call) { calls.emplace_back(call); }
 
-    std::vector<Cost> totalCost() const {
-      std::vector<Cost> sum;
-      sum.reserve(costs.size());
-      for (int ic = 0; ic < sum.size(); ic++) {
-        for (const auto& c : costs) {
-          sum[ic] += c.costs[ic];
-        }
-
-
-      }
-      return sum;
-    }
 
   };
 
   explicit CallgrindParser(std::string filename) : filename(std::move(filename)) {}
 
   void parse() {
+    auto get_position_from_cache = [this] (const Position& position) -> std::shared_ptr<Position> {
+      auto cached_position =
+          std::find_if(begin(this->positions_cache_), end(this->positions_cache_),
+                       [&position](const auto &p) {
+            return *p == position;
+          });
+
+      if (cached_position == end(positions_cache_)) {
+        auto new_cache_entry = std::make_shared<Position>(position);
+        this->positions_cache_.emplace_back(new_cache_entry);
+        return new_cache_entry;
+      }
+
+      return *cached_position;
+    };
+
     /* positions: [instr] [line]
     For cost lines, this defines the semantic of the first numbers. Any combination of "instr", "bb" and "line" is allowed,
     but has to be in this order which corresponds to position numbers at the start of the cost lines later in the file. */
@@ -145,67 +152,96 @@ class CallgrindParser {
       /* POSITION */
       if (std::optional<PositionSpec> cost_position;
           bool(cost_position = parsePositionLine(line, PositionType::Cost))) {
-        current_state = State::PositionDef;
 
-        if (!current_entry) {
-          current_entry = newEntry();
+        /* setup new event */
+        std::cout << "Begin entry" << std::endl;
+        auto new_entry = std::make_shared<Entry>();
+        /* populating position */
+        {
+          current_position_.setPosition(*cost_position);
+          while (std::getline(ifs, line) && (cost_position = parsePositionLine(line, PositionType::Cost))) {
+            current_position_.setPosition(*cost_position);
+          }
+          new_entry->position = get_position_from_cache(current_position_);
         }
+        /* line = CostSpec */
+        /* now parsing costs */
+        {
+          auto cost_spec = parseCostLine(line);
+          if (!cost_spec) {
+            throw std::runtime_error("Expected cost spec");
+          }
+          new_entry->addCost(*cost_spec);
+          while (std::getline(ifs, line)) {
+            if ((cost_spec = parseCostLine(line))) {
+              new_entry->addCost(*cost_spec);
+            } else if (parsePositionLine(line, PositionType::FiFe)) {
+              std::cout << "Ignore fife" << std::endl;
+            } else {
+              break;
+            }
+          }
+        }
+        while (true) {
+          /* here line is call position spec or endline */
+          if (std::optional<PositionSpec> call_position;
+            bool(call_position = parsePositionLine(line, PositionType::Call))) {
 
-        costs_target = current_entry;
-
-        current_position.setPosition(*cost_position);
-
-        if (verbose_) std::cout << line << std::endl;
-      }
-        /* COSTS LINE */
-      else if (std::optional<CostSpec> cost;
-          costs_target && bool(cost = parseCostLine(line))) {
-        if (current_state == State::PositionDef || current_state == State::CallPositionDef) {
-          auto tmp = current_position;
-          auto cached_position = std::find_if(begin(positions_cache_), end(positions_cache_), [&tmp](const auto &p) {
-            return *p == tmp;
-          });
-
-          auto entry_ptr = current_state == State::PositionDef ? current_entry : current_call_entry;
-          if (cached_position == end(positions_cache_)) {
-            entry_ptr->position = std::make_shared<Position>(current_position);
-            positions_cache_.emplace_back(entry_ptr->position);
+            std::cout << "Begin call" << std::endl;
+            auto call_entry = std::make_shared<Entry>();
+            current_position_.setPosition(*call_position);
+            while (std::getline(ifs, line) && (call_position = parsePositionLine(line, PositionType::Call))) {
+              current_position_.setPosition(*call_position);
+            }
+            call_entry->position = get_position_from_cache(current_position_);
+            /* here line is call line */
+            auto call_line = parseCallLine(line);
+            if (!call_line) {
+              throw std::runtime_error("Expected call line");
+            }
+            Call call(call_line->ncalls, call_line->sub_positions, call_entry);
+            {
+              /* we expect cost line after */
+              std::getline(ifs, line);
+              auto cost_spec = parseCostLine(line);
+              if (!cost_spec) {
+                throw std::runtime_error("Expected cost line after call");
+              }
+              while (std::getline(ifs, line)) {
+                if ((cost_spec = parseCostLine(line))) {
+                  call.addCost(*cost_spec);
+                }
+                /* fi/fe= */
+                else if (parsePositionLine(line, PositionType::FiFe)) {
+                  std::cout << "Ignore fife" << std::endl;
+                }
+                else {
+                  break;
+                }
+              }
+            }
+            /* now we ready to add new call */
+            new_entry->addCall(std::move(call));
+            /* now line should be empty */
+          } else if (parseEmptyLine(line)) {
+            break;
           } else {
-            entry_ptr->position = *cached_position;
+            throw std::runtime_error("Unexpected not empty line");
           }
 
+          for (const auto &entry : entries) {
+            for (auto& call : entry->calls) {
+              if (*call.entry->position == *new_entry->position) {
+                call.entry = new_entry;
+                std::cout << "Found nested entry" << std::endl;
+              }
+            }
+          }
 
+          entries.emplace_back(new_entry);
         }
-        else if (current_state == State::CostsDef) {
-          /* ignore */
-        }
-        else {
-          throw std::runtime_error("Unexpected state");
-        }
-        current_state = State::CostsDef;
-        costs_target->addCost(*cost);
-        if (verbose_) std::cout << line << std::endl;
-      }
-        /* CALL POSITION */
-      else if (std::optional<PositionSpec> call_position;
-          bool(call_position = parsePositionLine(line, PositionType::Call))) {
-        if (current_state == State::CostsDef) {
-          current_call_entry.reset();
-        }
+        std::cout << "End entry" << std::endl;
 
-        current_state = State::CallPositionDef;
-        current_position.setPosition(*call_position);
-        if (!current_call_entry) {
-          current_call_entry = newEntry();
-        }
-        if (verbose_) std::cout << line << std::endl;
-      }
-        /* CALL LINE */
-      else if (std::optional<CallSpec> call_spec;
-          current_call_entry && bool(call_spec = parseCallLine(line))) {
-        current_entry->addCall(Call(call_spec->ncalls, call_spec->sub_positions, current_call_entry));
-        costs_target = current_call_entry;
-        if (verbose_) std::cout << line << std::endl;
       }
         /* header */
       else if (std::regex_search(line, match_results, re_positions_def)) {
@@ -220,22 +256,9 @@ class CallgrindParser {
         }
         if (verbose_) std::cout << line << std::endl;
       } else if (parseEmptyLine(line)) {
-        if (current_entry) {
-          for (const auto &entry : entries) {
-            for (auto& call : entry->calls) {
-              if (*call.entry->position == *current_entry->position) {
-                call.entry = current_entry;
-                std::cout << "Found nested entry" << std::endl;
-              }
-            }
-          }
 
-          entries.emplace_back(current_entry);
-        }
 
-        current_entry.reset();
-        current_call_entry.reset();
-        costs_target.reset();
+
       } else {
         std::cerr << line_number << ": " << line << std::endl;
       }
@@ -279,13 +302,16 @@ class CallgrindParser {
     return std::regex_search(empty_line, re_empty);
   }
 
+
   std::optional<PositionSpec> parsePositionLine(const std::string &line, PositionType position_type) {
     /* CostPosition := "ob" | "fl" | "fi" | "fe" | "fn" */
     /* CalledPosition := " "cob" | "cfi" | "cfl" | "cfn" */
-    const std::regex re_position_spec(
-        position_type == PositionType::Cost ?
-        R"(^(ob|fl|fi|fe|fn)=[ \t]*(\(\d+\))?[ \t]*(.*)$)" :
-        R"(^c(ob|fl|fi|fn)=[ \t]*(\(\d+\))?[ \t]*(.*)$)");
+    const std::map<PositionType, std::string> re_map {
+      {PositionType::Cost, R"(^(ob|fl|fi|fe|fn)=[ \t]*(\(\d+\))?[ \t]*(.*)$)"},
+      {PositionType::Call, R"(^c(ob|fl|fi|fn)=[ \t]*(\(\d+\))?[ \t]*(.*)$)"},
+      {PositionType::FiFe, R"(^(fi|fe)=[ \t]*(\(\d+\))?[ \t]*(.*)$)"}
+    };
+    const std::regex re_position_spec(re_map.at(position_type));
 
     std::smatch match_results;
 
@@ -403,11 +429,6 @@ class CallgrindParser {
     return {};
   }
 
-  std::shared_ptr<Entry> newEntry() {
-    auto result = std::make_shared<Entry>();
-    return result;
-  }
-
  public:
   void SetVerbose(bool verbose) {
     CallgrindParser::verbose_ = verbose;
@@ -433,28 +454,10 @@ class CallgrindParser {
 
   std::string current_line;
 
-
-
-  Position current_position;
-
-
-
-
-
-
-
-  std::map<std::pair<std::string, unsigned int>, std::string> position_compression_cache_;
-
-
   std::string filename;
 
-  State current_state{State::Initialization};
-  EntryPtr current_entry{nullptr};
-  EntryPtr current_call_entry{nullptr};
-  EntryPtr costs_target{nullptr};
 
-
-
+  Position current_position_;
   std::vector<std::shared_ptr<Entry>> entries;
   std::vector<std::shared_ptr<Position>> positions_cache_;
 
