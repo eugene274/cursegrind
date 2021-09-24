@@ -2,11 +2,23 @@
 #include <cassert>
 #include <ncurses.h>
 
+#include "CallgrindParser.hpp"
+
 WINDOW *create_newwin(int height, int width, int starty, int startx);
 void destroy_win(WINDOW *local_win);
 
 int main(int argc, char *argv[]) {
   WINDOW *my_win;
+
+  if (argc == 1)
+    return 1;
+
+  std::string file_to_process{argv[1]};
+  CallgrindParser parser(file_to_process);
+  parser.SetVerbose(false);
+  parser.parse();
+
+
   int startx, starty, width, height;
   int ch;
 
@@ -29,10 +41,10 @@ int main(int argc, char *argv[]) {
   assert(init_color(color_test, 500, 500, 500) != ERR);
 
 
-  height = 2;
-  width = 20;
-  starty = (LINES - height) / 2;    /* Calculating for a center placement */
-  startx = (COLS - width) / 2;    /* of the window		*/
+  height = LINES - 1;
+  width = COLS - 1;
+  starty = 1;   /* Calculating for a center placement */
+  startx = 1;    /* of the window		*/
   printw("Press F1 to exit");
   refresh();
 
@@ -40,21 +52,33 @@ int main(int argc, char *argv[]) {
   attron(COLOR_PAIR(1));
   my_win = create_newwin(height, width, starty, startx);
 
-  while ((ch = getch()) != KEY_F(1)) {
-    switch (ch) {
-      case KEY_LEFT:destroy_win(my_win);
-        my_win = create_newwin(height, width, starty, --startx);
-        break;
-      case KEY_RIGHT:destroy_win(my_win);
-        my_win = create_newwin(height, width, starty, ++startx);
-        break;
-      case KEY_UP:destroy_win(my_win);
-        my_win = create_newwin(height, width, --starty, startx);
-        break;
-      case KEY_DOWN:destroy_win(my_win);
-        my_win = create_newwin(height, width, ++starty, startx);
-        break;
+  /* header */
+  wprintw(my_win, "\t%s", file_to_process.c_str());
+
+  auto max_cost = parser.getEntries()[0]->totalCost()[0];
+
+  int entry_offset = 0;
+  int ientry = entry_offset;
+  int top_margin = 2;
+  int bottom_margin = 2;
+  for (int iline = top_margin; iline < height-bottom_margin;++iline) {
+    if (ientry < parser.getEntries().size()) {
+      const auto& entry = parser.getEntries()[ientry];
+      auto entry_cost = entry->totalCost()[0];
+      mvprintw(iline, 2, "%4u\t%u:\t%s/%s",
+               100 * entry_cost / max_cost,
+               entry_cost,
+               entry->position->ob.c_str(), entry->position->fn.c_str());
+    } else {
+      break;
     }
+    ientry++;
+  }
+
+
+  wrefresh(my_win);
+  while ((ch = getch()) != KEY_F(1)) {
+
   }
 
   attroff(COLOR_PAIR(1));
@@ -71,7 +95,6 @@ WINDOW *create_newwin(int height, int width, int starty, int startx) {
   box(local_win, 0, 0);        /* 0, 0 gives default characters
 					 * for the vertical and horizontal
 					 * lines			*/
-  wprintw(local_win, "HW!");
   wrefresh(local_win);        /* Show that box 		*/
 
   return local_win;

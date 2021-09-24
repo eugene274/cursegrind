@@ -10,6 +10,7 @@
 #include <utility>
 #include <iostream>
 #include <regex>
+#include <optional>
 #include <boost/lexical_cast.hpp>
 
 class CallgrindParser {
@@ -165,6 +166,8 @@ class CallgrindParser {
       return !is_eof;
     };
 
+    Position current_position;
+
     while (getline()) {
       std::smatch match_results;
       /* POSITION */
@@ -176,11 +179,11 @@ class CallgrindParser {
         auto new_entry = std::make_shared<Entry>();
         /* populating position */
         {
-          current_position_.setPosition(*cost_position);
+          current_position.setPosition(*cost_position);
           while (getline() && (cost_position = parsePositionLine(line, PositionType::Cost))) {
-            current_position_.setPosition(*cost_position);
+            current_position.setPosition(*cost_position);
           }
-          new_entry->position = get_position_from_cache(current_position_);
+          new_entry->position = get_position_from_cache(current_position);
         }
         /* line = CostSpec */
         /* now parsing costs */
@@ -202,16 +205,17 @@ class CallgrindParser {
         }
         while (true) {
           /* here line is call position spec or endline */
-          if (std::optional<PositionSpec> call_position;
-              bool(call_position = parsePositionLine(line, PositionType::Call))) {
+          Position call_position = current_position;
+          if (std::optional<PositionSpec> call_position_spec;
+              bool(call_position_spec = parsePositionLine(line, PositionType::Call))) {
 
             if (verbose_) std::cout << "Begin call" << std::endl;
             auto call_entry = std::make_shared<Entry>();
-            current_position_.setPosition(*call_position);
-            while (getline() && (call_position = parsePositionLine(line, PositionType::Call))) {
-              current_position_.setPosition(*call_position);
+            call_position.setPosition(*call_position_spec);
+            while (getline() && (call_position_spec = parsePositionLine(line, PositionType::Call))) {
+              call_position.setPosition(*call_position_spec);
             }
-            call_entry->position = get_position_from_cache(current_position_);
+            call_entry->position = get_position_from_cache(call_position);
             /* here line is call line */
             auto call_line = parseCallLine(line);
             if (!call_line) {
@@ -252,7 +256,7 @@ class CallgrindParser {
         // while (true)
 
 
-        for (const auto &entry : entries) {
+        for (const auto &entry : entries_) {
           for (auto &call : entry->calls) {
             if (*call.entry->position == *new_entry->position) {
               call.entry = new_entry;
@@ -260,7 +264,7 @@ class CallgrindParser {
             }
           }
         }
-        entries.emplace_back(new_entry);
+        entries_.emplace_back(new_entry);
 
         if (verbose_) std::cout << "End entry" << std::endl;
 
@@ -285,7 +289,7 @@ class CallgrindParser {
 
     }
 
-    std::sort(begin(entries), end(entries), [](const EntryPtr &lhs, const EntryPtr &rhs) {
+    std::sort(begin(entries_), end(entries_), [](const EntryPtr &lhs, const EntryPtr &rhs) {
       return lhs->totalCost()[0] > rhs->totalCost()[0];
     });
 
@@ -457,20 +461,25 @@ class CallgrindParser {
     using std::cout;
     using std::endl;
 
-    cout << "Entries: " << entries.size() << "; " << endl;
+    cout << "Entries: " << entries_.size() << "; " << endl;
     cout << "Unique positions: " << positions_cache_.size() << "; " << endl;
     cout << endl;
     printTopEntries(cout, 100);
   }
 
+  const std::vector<std::shared_ptr<Entry>> &getEntries() const {
+    return entries_;
+  }
+
  private:
   void printTopEntries(std::ostream &os, unsigned int ne = 0) const {
-    ne = ne == 0 ? entries.size() : ne;
+    ne = ne == 0 ? entries_.size() : ne;
 
-    for (const auto &entry : entries) {
+    auto max_cost = entries_[0]->totalCost();
+    for (const auto &entry : entries_) {
       if (ne == 0) break;
 
-      os << entry->totalCost()[0] << "\t\t" << entry->position->ob << "::" << entry->position->fn  << std::endl;
+      os << entry->totalCost()[0] * 100/ max_cost[0]  << "% " << entry->totalCost()[0] << "\t\t" << entry->position->ob << "::" << entry->position->fn  << std::endl;
       --ne;
     }
 
@@ -486,8 +495,8 @@ class CallgrindParser {
 
   std::string filename;
 
-  Position current_position_;
-  std::vector<std::shared_ptr<Entry>> entries;
+
+  std::vector<std::shared_ptr<Entry>> entries_;
   std::vector<std::shared_ptr<Position>> positions_cache_;
 
   bool verbose_{true};
