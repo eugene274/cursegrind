@@ -473,6 +473,8 @@ class CallgrindParser {
 
  private:
   void printTopEntries(std::ostream &os, unsigned int ne = 0) const {
+    if (entries_.empty())
+      return;
     ne = ne == 0 ? entries_.size() : ne;
 
     auto max_cost = entries_[0]->totalCost();

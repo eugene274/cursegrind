@@ -1,8 +1,193 @@
 #include <iostream>
 #include <cassert>
 #include <ncurses.h>
+#include <filesystem>
 
 #include "CallgrindParser.hpp"
+
+std::string short_path(const std::string &f) {
+  namespace fs = std::filesystem;
+  fs::path p(f);
+  return p.filename();
+}
+
+struct ViewEntries {
+  ViewEntries(CallgrindParser &parser) : parser(parser) {}
+  ~ViewEntries() {
+    delwin(window);
+  }
+
+ public:
+  enum NameViewMode {
+    kObject, kFilename
+  };
+  enum CostViewMode {
+    kRelative, kAbsolute
+  };
+
+  void render() {
+    auto height = LINES - 1;
+    auto width = COLS - 1;
+    if (!window) {
+      window = newwin(height, width, 1, 1);
+    } else {
+      height = getmaxy(window);
+      width = getmaxx(window);
+    }
+
+    init_pair(1, COLOR_WHITE, COLOR_BLACK);
+    init_pair(2, COLOR_BLACK, COLOR_WHITE);
+
+    wclear(window);
+
+    box(window, 0, 0);
+    auto actual_width = width - 2;
+
+    const auto nlines = getNumberOfLines();
+
+    int ientry = entry_offset;
+    auto max_cost = parser.getEntries()[0]->totalCost()[0];
+    for (int iline = 1; iline <= nlines; ++iline) {
+      if (ientry < parser.getEntries().size()) {
+        const auto &entry = parser.getEntries().at(ientry);
+        auto entry_cost = entry->totalCost()[0];
+        if (iline == selected_line) {
+          wattron(window, COLOR_PAIR(2));
+        } else {
+          wattron(window, COLOR_PAIR(1));
+        }
+
+        std::string position = name_repr == kObject ? entry->position->ob : entry->position->fl;
+        std::string function = entry->position->fn;
+        std::string delim = " : ";
+
+        std::stringstream costs_stream;
+        if (costs_repr == kRelative) {
+          costs_stream << std::setw(10) << std::setprecision(2) << 100 * double(entry_cost) / max_cost << "%";
+        } else {
+          costs_stream << std::setw(10) << std::setprecision(4) << double(entry_cost);
+        }
+        std::string costs = costs_stream.str();
+
+        auto name = short_path(position) + "/" + function;
+        auto max_name_width = actual_width - delim.size() - costs.size();
+        if (name.size() > max_name_width) {
+          if (iline == selected_line) {
+            auto max_line_offset = name.size() - max_name_width;
+            if (selected_line_offset > max_line_offset) {
+              selected_line_offset = max_line_offset;
+            }
+            name = name.substr(selected_line_offset, max_name_width);
+            if (selected_line_offset < max_line_offset) {
+              name[name.length() - 1] = '>';
+            }
+          } else {
+            name = name.substr(0, actual_width - 3 - costs.size());
+            name[name.length() - 1] = '>';
+          }
+          if (iline == selected_line && selected_line_offset > 0) {
+            name[0] = '<';
+          }
+        }
+
+        mvwprintw(
+            window,
+            iline, 1,
+            "%s%s%s",
+            costs_stream.str().c_str(),
+            delim.c_str(),
+            name.c_str());
+        lastline = iline;
+      } else {
+        break;
+      }
+      ientry++;
+    }
+    wattron(window, COLOR_PAIR(1));
+    wrefresh(window);
+  }
+
+  void shift_selection(int pos) {
+    selected_line += pos;
+    if (entry_offset + selected_line >= parser.getEntries().size()) {
+      selected_line = parser.getEntries().size() - entry_offset;
+    } else if (selected_line >= lastline) {
+      selected_line = lastline - 1;
+      if (entry_offset < parser.getEntries().size() - 1) entry_offset++;
+    } else if (selected_line < 1) {
+      selected_line = 1;
+      if (entry_offset > 0) entry_offset--;
+    }
+    selected_line_offset = 0;
+    render();
+  }
+
+  void shift_page(int d) {
+    if (d > 0) {
+      if (entry_offset + getNumberOfLines() >= parser.getEntries().size()) {
+        /* do nothing */
+      } else {
+        entry_offset += getNumberOfLines();
+        if (entry_offset + selected_line >= parser.getEntries().size()) {
+          selected_line = parser.getEntries().size() - entry_offset;
+        }
+      }
+    } else if (d < 0) {
+      if (entry_offset - getNumberOfLines() < 0) {
+        entry_offset = 0;
+      } else {
+        entry_offset -= getNumberOfLines();
+      }
+    }
+    selected_line_offset = 0;
+    render();
+  }
+
+  void shift_selected_line_offset(int pos) {
+    if (pos < 0 && selected_line_offset < -pos) {
+      selected_line_offset = 0;
+    } else {
+      selected_line_offset += pos;
+    }
+    render();
+  }
+
+  void reset_selected_line_offset() {
+    selected_line_offset = 0;
+    render();
+  }
+
+  void toggle_name_repr() {
+    if (name_repr == kObject)
+      name_repr = kFilename;
+    else
+      name_repr = kObject;
+    render();
+  }
+
+  void toggle_costs_repr() {
+    if (costs_repr == kRelative)
+      costs_repr = kAbsolute;
+    else
+      costs_repr = kRelative;
+    render();
+  }
+
+ private:
+  inline int getNumberOfLines() const {
+    return getmaxy(window) - 2;
+  }
+
+  WINDOW *window{nullptr};
+  CallgrindParser &parser;
+
+  int name_repr{0};
+  int costs_repr{kRelative};
+  int entry_offset{0};
+  size_t selected_line_offset{0};
+  size_t selected_line{1};
+  int lastline{1};
+};
 
 int main(int argc, char *argv[]) {
   WINDOW *my_win;
@@ -15,7 +200,6 @@ int main(int argc, char *argv[]) {
   parser.SetVerbose(false);
   parser.parse();
 
-
   int ch;
 
   initscr();            /* Start curses mode 		*/
@@ -26,7 +210,6 @@ int main(int argc, char *argv[]) {
   }
   start_color();
 
-
   cbreak();            /* Line buffering disabled, Pass on
 					 * everty thing to me 		*/
   keypad(stdscr, TRUE);        /* I need that nifty F1 	*/
@@ -36,89 +219,41 @@ int main(int argc, char *argv[]) {
 
   noecho();
 
-
-  printw("Press F1 to exit");
+  printw("Press F10 to exit");
   refresh();
 
+  ViewEntries view_entries{parser};
+  view_entries.render();
 
-  auto draw_main = [&parser] (
-      int entry_offset = 0,
-      int line_selected = 1) {
-
-    init_pair(1, COLOR_WHITE, COLOR_BLACK);
-    init_pair(2, COLOR_BLACK, COLOR_WHITE);
-
-    auto height = LINES - 1;
-    auto width = COLS - 1;
-    auto main_win = newwin(height, width, 1, 1);
-    box(main_win, 0, 0);
-
-    int top_margin = 2;
-    int bottom_margin = 2;
-    auto nlines = height - bottom_margin - top_margin;
-
-    entry_offset = nlines >= parser.getEntries().size()? 0 : entry_offset;
-    int ientry = entry_offset;
-
-    auto max_cost = parser.getEntries()[0]->totalCost()[0];
-    for (int iline = 1; iline < height-bottom_margin;++iline) {
-      if (ientry < parser.getEntries().size()) {
-        const auto& entry = parser.getEntries()[ientry];
-        auto entry_cost = entry->totalCost()[0];
-        if (iline == line_selected) {
-          wattron(main_win, COLOR_PAIR(2));
-        } else {
-          wattron(main_win, COLOR_PAIR(1));
-        }
-        mvwprintw(
-            main_win,
-            iline, 2, "%4u\t%u:\t%s/%s",
-            100 * entry_cost / max_cost,
-            entry_cost,
-            entry->position->ob.c_str(), entry->position->fn.c_str());
-      } else {
-        break;
-      }
-      ientry++;
-    }
-    wrefresh(main_win);
-    return main_win;
-  };
-
-
-  int current_offset = 0;
-  auto main_win = draw_main(current_offset);
-
-  auto shift_win = [&main_win,&current_offset,&draw_main] (int n) {
-    if (n == 0 ) {
-      return;
-    }
-    current_offset += n;
-    if (current_offset < 0) {
-      current_offset = 0;
-    }
-    wrefresh(main_win);
-    delwin(main_win);
-    main_win = draw_main(current_offset);
-  };
-
-
-  while ((ch = getch()) != KEY_F(1)) {
+  while ((ch = getch()) != KEY_F(10)) {
     switch (ch) {
-      case KEY_DOWN:
-        shift_win(1);
+      case 'j':
+      case KEY_DOWN:view_entries.shift_selection(1);
         break;
-      case KEY_UP:
-        shift_win(-1);
+      case 'k':
+      case KEY_UP:view_entries.shift_selection(-1);
         break;
-      case 'f':
-        shift_win(10);
+      case 'l':
+      case KEY_RIGHT: view_entries.shift_selected_line_offset(1);
         break;
-      case 'b':
-        shift_win(-10);
+      case 'h':
+      case KEY_LEFT: view_entries.shift_selected_line_offset(-1);
+        break;
+      case KEY_HOME: view_entries.reset_selected_line_offset();
+        break;
+      case KEY_NPAGE:
+      case 'f':view_entries.shift_page(1);
+        break;
+      case KEY_PPAGE:
+      case 'b':view_entries.shift_page(-1);
+        break;
+      case 'F':view_entries.toggle_name_repr();
+        break;
+      case 'C':view_entries.toggle_costs_repr();
         break;
       default:;
     }
+
   }
 
   attroff(COLOR_PAIR(1));

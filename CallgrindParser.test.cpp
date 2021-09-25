@@ -12,3 +12,10 @@ TEST(CallgrindParser, Basics) {
   parser.Summary();
   std::cout << "Done" << std::endl;
 }
+
+TEST(CallgrindParser, Empty) {
+  CallgrindParser parser("empty.out");
+  parser.SetVerbose(false);
+  parser.parse();
+  parser.Summary();
+}
