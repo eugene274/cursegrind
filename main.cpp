@@ -2,7 +2,9 @@
 #include <cassert>
 #include <ncurses.h>
 #include <thread>
+#include <mutex>
 #include <filesystem>
+#include <utility>
 
 #include "CallgrindParser.hpp"
 
@@ -13,7 +15,7 @@ std::string short_path(const std::string &f) {
 }
 
 struct ViewEntries {
-  ViewEntries(CallgrindParser &parser) : parser(parser) {}
+  explicit ViewEntries(std::shared_ptr<CallgrindParser> parser) : parser(std::move(parser)) {}
   ~ViewEntries() {
     delwin(window);
   }
@@ -26,7 +28,12 @@ struct ViewEntries {
     kRelative, kAbsolute
   };
 
+  void destroy() {
+    delwin(window);
+  }
+
   void render() {
+    render_lock.lock();
     auto height = LINES - 1;
     auto width = COLS - 1;
     if (!window) {
@@ -45,15 +52,19 @@ struct ViewEntries {
     auto actual_width = width - 2;
     const auto nlines = getNumberOfLines();
 
-    if (parser.getEntries().empty()) {
+    if (!parser || parser->getEntries().empty()) {
+      wrefresh(window);
+      render_lock.unlock();
       return;
     }
 
+    auto &entries = parser->getEntries();
+
     int ientry = entry_offset;
-    auto max_cost = parser.getEntries()[0]->totalCost()[0];
+    auto max_cost = entries[0]->totalCost()[0];
     for (int iline = 1; iline <= nlines; ++iline) {
-      if (ientry < parser.getEntries().size()) {
-        const auto &entry = parser.getEntries().at(ientry);
+      if (ientry < entries.size()) {
+        const auto &entry = entries.at(ientry);
         auto entry_cost = entry->totalCost()[0];
         if (iline == selected_line) {
           wattron(window, COLOR_PAIR(2));
@@ -109,15 +120,16 @@ struct ViewEntries {
     }
     wattron(window, COLOR_PAIR(1));
     wrefresh(window);
+    render_lock.unlock();
   }
 
   void shift_selection(int pos) {
     selected_line += pos;
-    if (entry_offset + selected_line >= parser.getEntries().size()) {
-      selected_line = parser.getEntries().size() - entry_offset;
+    if (entry_offset + selected_line >= parser->getEntries().size()) {
+      selected_line = parser->getEntries().size() - entry_offset;
     } else if (selected_line >= lastline) {
       selected_line = lastline - 1;
-      if (entry_offset < parser.getEntries().size() - 1) entry_offset++;
+      if (entry_offset < parser->getEntries().size() - 1) entry_offset++;
     } else if (selected_line < 1) {
       selected_line = 1;
       if (entry_offset > 0) entry_offset--;
@@ -128,12 +140,12 @@ struct ViewEntries {
 
   void shift_page(int d) {
     if (d > 0) {
-      if (entry_offset + getNumberOfLines() >= parser.getEntries().size()) {
+      if (entry_offset + getNumberOfLines() >= parser->getEntries().size()) {
         /* do nothing */
       } else {
         entry_offset += getNumberOfLines();
-        if (entry_offset + selected_line >= parser.getEntries().size()) {
-          selected_line = parser.getEntries().size() - entry_offset;
+        if (entry_offset + selected_line >= parser->getEntries().size()) {
+          selected_line = parser->getEntries().size() - entry_offset;
         }
       }
     } else if (d < 0) {
@@ -177,13 +189,46 @@ struct ViewEntries {
     render();
   }
 
+  int dispatch(int ch) {
+    switch (ch) {
+      case 'j':
+      case KEY_DOWN:shift_selection(1);
+        break;
+      case 'k':
+      case KEY_UP:shift_selection(-1);
+        break;
+      case 'l':
+      case KEY_RIGHT: shift_selected_line_offset(1);
+        break;
+      case 'h':
+      case KEY_LEFT: shift_selected_line_offset(-1);
+        break;
+      case '^':
+      case KEY_HOME: reset_selected_line_offset();
+        break;
+      case KEY_NPAGE:
+      case 'f':shift_page(1);
+        break;
+      case KEY_PPAGE:
+      case 'b':shift_page(-1);
+        break;
+      case 'F':toggle_name_repr();
+        break;
+      case 'C':toggle_costs_repr();
+        break;
+      default:;
+    }
+    return 0;
+  }
+
  private:
   inline int getNumberOfLines() const {
     return getmaxy(window) - 2;
   }
 
+  std::mutex render_lock;
   WINDOW *window{nullptr};
-  CallgrindParser &parser;
+  std::shared_ptr<CallgrindParser> parser{};
 
   int name_repr{0};
   int costs_repr{kRelative};
@@ -198,8 +243,6 @@ int main(int argc, char *argv[]) {
     return 1;
 
   std::string file_to_process{argv[1]};
-
-
 
   initscr();            /* Start curses mode 		*/
 
@@ -221,50 +264,27 @@ int main(int argc, char *argv[]) {
   printw("Press F10 to exit");
   refresh();
 
-  CallgrindParser parser(file_to_process);
-  parser.SetVerbose(false);
-  ViewEntries view_entries{parser};
-  view_entries.render();
+  auto parser = std::make_shared<CallgrindParser>(file_to_process);
+  auto entries_view = std::make_shared<ViewEntries>(parser);
+  parser->SetVerbose(false);
 
-  std::thread parse_thread([&parser, &view_entries] () {
-    parser.parse();
-    view_entries.render();
-  });
 
+  std::thread parse_thread([](
+      std::shared_ptr<CallgrindParser> parser,
+      std::shared_ptr<ViewEntries> entries_view
+      ) {
+    parser->parse();
+    entries_view->render();
+  }, parser, entries_view);
+  parse_thread.detach();
+
+  entries_view->render();
   int ch;
   while ((ch = getch()) != KEY_F(10)) {
-    switch (ch) {
-      case 'j':
-      case KEY_DOWN:view_entries.shift_selection(1);
-        break;
-      case 'k':
-      case KEY_UP:view_entries.shift_selection(-1);
-        break;
-      case 'l':
-      case KEY_RIGHT: view_entries.shift_selected_line_offset(1);
-        break;
-      case 'h':
-      case KEY_LEFT: view_entries.shift_selected_line_offset(-1);
-        break;
-      case '^':
-      case KEY_HOME: view_entries.reset_selected_line_offset();
-        break;
-      case KEY_NPAGE:
-      case 'f':view_entries.shift_page(1);
-        break;
-      case KEY_PPAGE:
-      case 'b':view_entries.shift_page(-1);
-        break;
-      case 'F':view_entries.toggle_name_repr();
-        break;
-      case 'C':view_entries.toggle_costs_repr();
-        break;
-      default:;
-    }
-
+    entries_view->dispatch(ch);
   }
 
-  attroff(COLOR_PAIR(1));
+  entries_view->destroy();
   endwin();            /* End curses mode		  */
   return 0;
 }

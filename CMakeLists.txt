@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 find_package(Curses REQUIRED)
 find_package(Boost REQUIRED)
+find_package (Threads REQUIRED)
 
 add_executable(callgrind_viewer main.cpp)
 target_include_directories(callgrind_viewer PRIVATE
@@ -14,7 +15,7 @@ target_include_directories(callgrind_viewer PRIVATE
 target_link_libraries(callgrind_viewer PRIVATE
         ${CURSES_LIBRARIES}
         ${BOOST_LIBRARIES}
-        pthread
+        Threads::Threads
         )
 
 include(FetchContent)
