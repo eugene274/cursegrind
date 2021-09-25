@@ -62,41 +62,37 @@ class CallgrindParser {
 
   struct Position {
     /* object */
-    std::string ob;
+    std::string binary;
     /* filename */
-    std::string fl;
+    std::string source;
     /* function name */
-    std::string fn;
-
-    std::string fi;
-
-    std::string fe;
+    std::string symbol;
 
     Position &operator=(const Position &other) = delete;
     void setPosition(const PositionSpec &spec) {
       if (spec.name == "ob") {
-        ob = spec.value;
+        binary = spec.value;
       } else if (spec.name == "fl") {
-        fl = spec.value;
+        source = spec.value;
       } else if (spec.name == "fn") {
-        fn = spec.value;
+        symbol = spec.value;
       } else if (spec.name == "fi") {
-        fi = spec.value;
+        source = spec.value;
       } else if (spec.name == "fe") {
-        fe = spec.value;
+        source = spec.value;
       } else {
         throw std::runtime_error("Unknown spec: " + spec.name);
       }
     }
     friend std::ostream &operator<<(std::ostream &os, const Position &position) {
-      os << "fl: " << position.fl << " fn: " << position.fn;
+      os << "fl: " << position.source << " fn: " << position.symbol;
       return os;
     }
 
     bool operator==(const Position &rhs) const {
-      return ob == rhs.ob &&
-          fl == rhs.fl &&
-          fn == rhs.fn;
+      return binary == rhs.binary &&
+          source == rhs.source &&
+          symbol == rhs.symbol;
     }
     bool operator!=(const Position &rhs) const {
       return !(rhs == *this);
@@ -252,19 +248,10 @@ class CallgrindParser {
             throw std::runtime_error("Unexpected not empty line");
           }
 
-        }
-        // while (true)
+        } // while (true)
 
 
-        for (const auto &entry : entries_) {
-          for (auto &call : entry->calls) {
-            if (*call.entry->position == *new_entry->position) {
-              call.entry = new_entry;
-              if (verbose_) std::cout << "Found nested entry" << std::endl;
-            }
-          }
-        }
-        entries_.emplace_back(new_entry);
+        entries_.push_back(new_entry);
 
         if (verbose_) std::cout << "End entry" << std::endl;
 
@@ -287,6 +274,17 @@ class CallgrindParser {
 //        std::cerr << current_line_number << ": " << line << std::endl;
       }
 
+    }
+
+    for (auto &entry1 : entries_) {
+      for (auto &entry1_call : entry1->calls) {
+        for (auto &entry2 : entries_) {
+          if (*(entry1_call.entry->position) == *(entry2->position)) {
+            entry1_call.entry = entry2;
+            break;
+          }
+        }
+      }
     }
 
     std::sort(begin(entries_), end(entries_), [](const EntryPtr &lhs, const EntryPtr &rhs) {
@@ -481,7 +479,7 @@ class CallgrindParser {
     for (const auto &entry : entries_) {
       if (ne == 0) break;
 
-      os << entry->totalCost()[0] * 100/ max_cost[0]  << "% " << entry->totalCost()[0] << "\t\t" << entry->position->ob << "::" << entry->position->fn  << std::endl;
+      os << entry->totalCost()[0] * 100/ max_cost[0] << "% " << entry->totalCost()[0] << "\t\t" << entry->position->binary << "::" << entry->position->symbol << std::endl;
       --ne;
     }
 
