@@ -284,7 +284,7 @@ class CallgrindParser {
       } else if (parseEmptyLine(line)) {
 
       } else {
-        std::cerr << current_line_number << ": " << line << std::endl;
+//        std::cerr << current_line_number << ": " << line << std::endl;
       }
 
     }

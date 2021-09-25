@@ -14,6 +14,7 @@ target_include_directories(callgrind_viewer PRIVATE
 target_link_libraries(callgrind_viewer PRIVATE
         ${CURSES_LIBRARIES}
         ${BOOST_LIBRARIES}
+        pthread
         )
 
 include(FetchContent)

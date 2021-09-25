@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cassert>
 #include <ncurses.h>
+#include <thread>
 #include <filesystem>
 
 #include "CallgrindParser.hpp"
@@ -39,11 +40,14 @@ struct ViewEntries {
     init_pair(2, COLOR_BLACK, COLOR_WHITE);
 
     wclear(window);
-
     box(window, 0, 0);
-    auto actual_width = width - 2;
 
+    auto actual_width = width - 2;
     const auto nlines = getNumberOfLines();
+
+    if (parser.getEntries().empty()) {
+      return;
+    }
 
     int ientry = entry_offset;
     auto max_cost = parser.getEntries()[0]->totalCost()[0];
@@ -190,17 +194,12 @@ struct ViewEntries {
 };
 
 int main(int argc, char *argv[]) {
-  WINDOW *my_win;
-
   if (argc == 1)
     return 1;
 
   std::string file_to_process{argv[1]};
-  CallgrindParser parser(file_to_process);
-  parser.SetVerbose(false);
-  parser.parse();
 
-  int ch;
+
 
   initscr();            /* Start curses mode 		*/
 
@@ -222,9 +221,17 @@ int main(int argc, char *argv[]) {
   printw("Press F10 to exit");
   refresh();
 
+  CallgrindParser parser(file_to_process);
+  parser.SetVerbose(false);
   ViewEntries view_entries{parser};
   view_entries.render();
 
+  std::thread parse_thread([&parser, &view_entries] () {
+    parser.parse();
+    view_entries.render();
+  });
+
+  int ch;
   while ((ch = getch()) != KEY_F(10)) {
     switch (ch) {
       case 'j':
@@ -239,6 +246,7 @@ int main(int argc, char *argv[]) {
       case 'h':
       case KEY_LEFT: view_entries.shift_selected_line_offset(-1);
         break;
+      case '^':
       case KEY_HOME: view_entries.reset_selected_line_offset();
         break;
       case KEY_NPAGE:
