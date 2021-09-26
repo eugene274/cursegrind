@@ -266,7 +266,14 @@ struct TreeView {
     auto width = COLS - 1;
     if (!window) {
       window = newwin(height, width, 1, 1);
-    } else {
+    }
+    else if (
+        getmaxx(window) != COLS-1 ||
+            getmaxy(window) != LINES-1) {
+      delwin(window);
+      window = newwin(height, width, 1, 1);
+    }
+    else {
       height = getmaxy(window);
       width = getmaxx(window);
     }

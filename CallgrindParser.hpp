@@ -103,9 +103,7 @@ class CallgrindParser {
     }
 
     bool operator==(const Position &rhs) const {
-      return binary == rhs.binary &&
-          source == rhs.source &&
-          symbol == rhs.symbol;
+      return symbol == rhs.symbol && binary == rhs.binary && source == rhs.source;
     }
     bool operator!=(const Position &rhs) const {
       return !(rhs == *this);
