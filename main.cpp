@@ -285,14 +285,18 @@ struct TreeView {
       nodes_initialized = true;
     }
 
-    int level = 0;
-    int inode = 0;
+    if (selected_inode - offset_inode >= actual_height - 2) {
+      offset_inode = selected_inode - (actual_height - 2);
+    }
+    else if (selected_inode < offset_inode) {
+      offset_inode = selected_inode;
+    }
+    int inode = offset_inode;
+    assert(inode >= 0);
     for (int iline = 1; iline < actual_height && inode < nodes.size(); ++iline, ++inode) {
       auto &node = *nodes[inode];
       std::stringstream line_text;
-      for (int i = 0; i < node.level; ++i) {
-        line_text << "  ";
-      }
+
       if (node.expandable) {
         if (node.is_expanded) {
           line_text << collapse_symbol << " " << node.text_expanded;
@@ -305,7 +309,7 @@ struct TreeView {
       if (inode == selected_inode) {
         wattron(window, COLOR_PAIR(2));
       }
-      mvwprintw(window, iline, 1, "%s", text.c_str());
+      mvwprintw(window, iline, 1+2*node.level, "%s", text.c_str());
       wattron(window, COLOR_PAIR(1));
     }
 
@@ -336,7 +340,7 @@ struct TreeView {
 
  private:
   void expand_selected() {
-    auto &current_node = nodes[selected_inode];
+    auto current_node = nodes[selected_inode];
     if (current_node->is_expanded)
       return;
     if (current_node->on_expand) {
@@ -353,14 +357,14 @@ struct TreeView {
   }
 
   void collapse_selected() {
-    auto &current_node = nodes[selected_inode];
+    auto current_node = nodes[selected_inode];
     if (!current_node->is_expanded) /* already collapsed */
       return;
     current_node->is_expanded = false;
     auto current_node_it = begin(nodes) + selected_inode;
     auto collapse_begin = current_node_it + 1;
-    auto collapse_end = std::find_if(collapse_begin, end(nodes), [&current_node](TreeNodePtr &ptr) {
-      return current_node->level == ptr->level;
+    auto collapse_end = std::find_if(collapse_begin, end(nodes), [&current_node](TreeNodePtr ptr) {
+      return current_node->level >= ptr->level;
     });
     nodes.erase(collapse_begin, collapse_end);
     render();
@@ -368,18 +372,50 @@ struct TreeView {
 
   static
   TreeNodePtr
-  makeNode(const CallgrindParser::EntryPtr &entry) {
+  makeCallNode(const CallgrindParser::Call& call) {
+    std::stringstream text_stream;
+    text_stream << "[calls=" << std::setprecision(2) << double(call.ncalls) << "] ";
+    text_stream << "[Ir=" << std::setprecision(2) << double(call.totalCosts()[0]) << "] ";
+    text_stream << call.entry->position->symbol << "\t";
     auto new_node = std::make_shared<TreeNode>();
     new_node->expandable = true;
     new_node->selectable = true;
-    new_node->text_collapsed = short_path(entry->position->source) + ":::" + entry->position->symbol;
-    new_node->text_expanded = short_path(entry->position->source) + ":::" + entry->position->symbol;
+    new_node->text_collapsed = text_stream.str();
+    new_node->text_expanded = text_stream.str();
+    auto call_entry = call.entry;
+    new_node->on_expand = [call_entry, new_node]() {
+      new_node->children.clear();
+      auto calls = call_entry->calls;
+      std::sort(begin(calls), end(calls), [] (const CallgrindParser::Call& lhs, const CallgrindParser::Call& rhs) {
+        return lhs.totalCosts()[0] > rhs.totalCosts()[0];
+      });
+      for (auto &call : calls) {
+        new_node->children.emplace_back(makeCallNode(call));
+      }
+    };
+    return new_node;
+  }
+
+  static
+  TreeNodePtr
+  makeEntryNode(const CallgrindParser::EntryPtr &entry) {
+    std::stringstream text_stream;
+    text_stream << "[" << std::setw(7) << std::setprecision(2) << double(entry->totalCost()[0]) << "] ";
+    text_stream << entry->position->symbol;
+    auto new_node = std::make_shared<TreeNode>();
+    new_node->expandable = true;
+    new_node->selectable = true;
+    new_node->text_collapsed = text_stream.str();
+    new_node->text_expanded = text_stream.str();
     new_node->is_expanded = false;
     new_node->on_expand = [entry, new_node]() {
       new_node->children.clear();
-      for (auto &call : entry->calls) {
-        auto call_entry = call.entry;
-        new_node->children.emplace_back(makeNode(call_entry));
+      auto calls = entry->calls;
+      std::sort(begin(calls), end(calls), [] (const CallgrindParser::Call& lhs, const CallgrindParser::Call& rhs) {
+        return lhs.totalCosts()[0] > rhs.totalCosts()[0];
+      });
+      for (auto &call : calls) {
+        new_node->children.emplace_back(makeCallNode(call));
       }
     };
     return new_node;
@@ -389,7 +425,7 @@ struct TreeView {
     auto &entries = parser->getEntries();
 
     for (auto &entry : entries) {
-      nodes.emplace_back(makeNode(entry));
+      nodes.emplace_back(makeEntryNode(entry));
     }
   }
 
@@ -424,6 +460,7 @@ struct TreeView {
   }
 
   int selected_inode{0};
+  int offset_inode{0};
 
   WINDOW *window{nullptr};
   std::shared_ptr<const CallgrindParser> parser{};

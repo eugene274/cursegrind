@@ -58,6 +58,19 @@ class CallgrindParser {
     std::shared_ptr<Entry> entry;
 
     void addCost(const CostSpec &spec) { costs.emplace_back(spec); }
+    std::vector<Cost> totalCosts() const {
+      std::vector<Cost> result;
+      for (auto &cost_spec : costs) {
+        if (result.empty()) {
+          result = cost_spec.costs;
+          continue;
+        }
+        for (int i = 0; i < cost_spec.costs.size(); ++i) {
+          result[i] += cost_spec.costs[i];
+        }
+      }
+      return result;
+    }
   };
 
   struct Position {
