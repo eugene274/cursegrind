@@ -241,16 +241,26 @@ struct ListView {
 
 struct TreeView {
 
+  enum CostsView {
+    kAbsolute,
+    kPersentage
+  };
+  enum ENameView {
+    kSymbolOnly,
+    kFileSymbol,
+    kObjectSymbol
+  };
+
   struct TreeNode {
     int level{0};
     bool expandable{true};
     bool selectable{true};
-    std::string text_collapsed{};
-    std::string text_expanded{};
     std::vector<std::shared_ptr<TreeNode>> children;
+    std::function<std::string(int, int)> render_string;
     std::function<void()> on_expand;
 
     bool is_expanded{false};
+    bool is_selected{false};
   };
 
   using TreeNodePtr = std::shared_ptr<TreeNode>;
@@ -261,6 +271,7 @@ struct TreeView {
   void render() {
     static std::string expand_symbol = "[+]";
     static std::string collapse_symbol = "[-]";
+    static std::string nonexpandable_symbol = " * ";
 
     auto height = LINES - 1;
     auto width = COLS - 1;
@@ -289,6 +300,11 @@ struct TreeView {
 
     if (!nodes_initialized) {
       initNodes();
+      auto first_selectable_it = std::find_if(begin(nodes), end(nodes), [] (TreeNodePtr& nodeptr) {
+        return nodeptr->selectable;
+      });
+      selected_inode = std::distance(begin(nodes), first_selectable_it);
+      nodes[selected_inode]->is_selected = true;
       nodes_initialized = true;
     }
 
@@ -304,19 +320,19 @@ struct TreeView {
       auto &node = *nodes[inode];
       std::stringstream line_text;
 
-      if (node.expandable) {
-        if (node.is_expanded) {
-          line_text << collapse_symbol << " " << node.text_expanded;
-        } else {
-          line_text << expand_symbol << " " << node.text_collapsed;
-        }
-      }
-      auto text = line_text.str();
+      std::string bullet_symbol = node.expandable?
+          node.is_expanded? collapse_symbol : expand_symbol :
+          nonexpandable_symbol;
 
-      if (inode == selected_inode) {
+      line_text << node.render_string(0,0);
+
+      auto text = line_text.str();
+      auto node_offset = 1 + 2*node.level;
+      mvwprintw(window, iline, node_offset, "%s", bullet_symbol.c_str());
+      if (node.is_selected) {
         wattron(window, COLOR_PAIR(2));
       }
-      mvwprintw(window, iline, 1+2*node.level, "%s", text.c_str());
+      mvwprintw(window, iline, node_offset + 1 + bullet_symbol.length(), "%s", text.c_str());
       wattron(window, COLOR_PAIR(1));
     }
 
@@ -326,15 +342,22 @@ struct TreeView {
   int dispatch(int ch) {
     switch (ch) {
       case 'e':
+      case 'l':
       case KEY_RIGHT:expand_selected();
         break;
+      case 'h':
       case KEY_LEFT:collapse_selected();
         break;
+      case 'j':
       case KEY_DOWN:
       case 'n':next_selectable();
         break;
+      case 'k':
       case KEY_UP:
       case 'p':prev_selectable();
+        break;
+      case 'v':
+        toggleNameView();
         break;
       default:;
     }
@@ -348,6 +371,9 @@ struct TreeView {
  private:
   void expand_selected() {
     auto current_node = nodes[selected_inode];
+    if (!current_node->expandable) {
+      return;
+    }
     if (current_node->is_expanded)
       return;
     if (current_node->on_expand) {
@@ -377,20 +403,32 @@ struct TreeView {
     render();
   }
 
-  static
+
   TreeNodePtr
   makeCallNode(const CallgrindParser::Call& call) {
-    std::stringstream text_stream;
-    text_stream << "[calls=" << std::setprecision(2) << double(call.ncalls) << "] ";
-    text_stream << "[Ir=" << std::setprecision(2) << double(call.totalCosts()[0]) << "] ";
-    text_stream << call.entry->position->symbol << "\t";
+
     auto new_node = std::make_shared<TreeNode>();
     new_node->expandable = true;
     new_node->selectable = true;
-    new_node->text_collapsed = text_stream.str();
-    new_node->text_expanded = text_stream.str();
+    new_node->render_string = [this, new_node, call] (int, int) {
+      std::stringstream text_stream;
+      text_stream << "[calls=" << std::setprecision(2) << double(call.ncalls) << "] ";
+      text_stream << "[Ir=" << std::setprecision(2) << double(call.totalCosts()[0]) << "] ";
+      if (name_view == kSymbolOnly) {
+        text_stream << call.entry->position->symbol;
+      } else if (name_view == kFileSymbol) {
+        text_stream << short_path(call.entry->position->source) << ":::" << call.entry->position->symbol;
+      } else if (name_view == kObjectSymbol) {
+        text_stream << short_path(call.entry->position->binary) << ":::" << call.entry->position->symbol;
+      }
+      return text_stream.str();
+    };
     auto call_entry = call.entry;
-    new_node->on_expand = [call_entry, new_node]() {
+    if (call_entry->calls.empty()) {
+      new_node->expandable = false;
+      return new_node;
+    }
+    new_node->on_expand = [this,call_entry, new_node]() {
       new_node->children.clear();
       auto calls = call_entry->calls;
       std::sort(begin(calls), end(calls), [] (const CallgrindParser::Call& lhs, const CallgrindParser::Call& rhs) {
@@ -403,19 +441,35 @@ struct TreeView {
     return new_node;
   }
 
-  static
+
   TreeNodePtr
   makeEntryNode(const CallgrindParser::EntryPtr &entry) {
-    std::stringstream text_stream;
-    text_stream << "[" << std::setw(7) << std::setprecision(2) << double(entry->totalCost()[0]) << "] ";
-    text_stream << entry->position->symbol;
+
     auto new_node = std::make_shared<TreeNode>();
     new_node->expandable = true;
     new_node->selectable = true;
-    new_node->text_collapsed = text_stream.str();
-    new_node->text_expanded = text_stream.str();
     new_node->is_expanded = false;
-    new_node->on_expand = [entry, new_node]() {
+
+    new_node->render_string = [this, entry, new_node] (int , int) -> std::string {
+      std::stringstream text_stream;
+      text_stream << "[" << std::setw(7) << std::setprecision(2) << double(entry->totalCost()[0]) << "] ";
+      if (name_view == kSymbolOnly) {
+        text_stream << entry->position->symbol;
+      } else if (name_view == kFileSymbol) {
+        text_stream << short_path(entry->position->source) << ":::" << entry->position->symbol;
+      } else if (name_view == kObjectSymbol) {
+        text_stream << short_path(entry->position->binary) << ":::" << entry->position->symbol;
+      }
+      return text_stream.str();
+    };
+
+    if (entry->calls.empty()) {
+      new_node->expandable = false;
+      new_node->is_expanded = false;
+      return new_node;
+    }
+
+    new_node->on_expand = [this,entry, new_node]() {
       new_node->children.clear();
       auto calls = entry->calls;
       std::sort(begin(calls), end(calls), [] (const CallgrindParser::Call& lhs, const CallgrindParser::Call& rhs) {
@@ -444,7 +498,9 @@ struct TreeView {
     if (next_selectable_node_it == end(nodes)) {
       /* ignore */
     } else {
+      nodes[selected_inode]->is_selected = false;
       selected_inode = std::distance(begin(nodes), next_selectable_node_it);
+      nodes[selected_inode]->is_selected = true;
     }
     render();
   }
@@ -460,12 +516,26 @@ struct TreeView {
     if (prev_selectable_node_it == rend(nodes)) {
       /* ignore */
     } else {
+      nodes[selected_inode]->is_selected = false;
       selected_inode = nodes.size() - std::distance(rbegin(nodes), prev_selectable_node_it) - 1;
+      nodes[selected_inode]->is_selected = true;
     }
 
     render();
   }
 
+  void toggleNameView() {
+    if (name_view == kSymbolOnly) {
+      name_view = kFileSymbol;
+    } else if (name_view == kFileSymbol) {
+      name_view = kObjectSymbol;
+    } else if (name_view == kObjectSymbol) {
+      name_view = kSymbolOnly;
+    }
+    render();
+  }
+
+  ENameView name_view{kSymbolOnly};
   int selected_inode{0};
   int offset_inode{0};
 
