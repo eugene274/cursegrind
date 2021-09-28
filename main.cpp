@@ -267,6 +267,9 @@ struct TreeView {
 
   explicit TreeView(std::shared_ptr<CallgrindParser> parser) : parser(std::move(parser)) {
   }
+  ~TreeView() {
+    destroy();
+  }
 
   void render() {
     static std::string expand_symbol = "[+]";
@@ -275,13 +278,16 @@ struct TreeView {
 
     auto height = LINES - 1;
     auto width = COLS - 1;
+
     if (!window) {
       window = newwin(height, width, 1, 1);
+      keypad(window, true);
     } else if (
         getmaxx(window) != COLS - 1 ||
             getmaxy(window) != LINES - 1) {
       delwin(window);
       window = newwin(height, width, 1, 1);
+      keypad(window, true);
     } else {
       height = getmaxy(window);
       width = getmaxx(window);
@@ -333,9 +339,11 @@ struct TreeView {
     }
 
     wrefresh(window);
+
   }
 
-  int dispatch(int ch) {
+  int dispatch(int) {
+    auto ch= wgetch(window);
     switch (ch) {
       case 'e':
       case 'l':
@@ -356,13 +364,16 @@ struct TreeView {
         break;
       case 'c':toggleCostsView();
         break;
+      case KEY_F(10):
+        return -1;
       default:;
     }
     return 0;
   }
 
   void destroy() {
-
+    if (window)
+      delwin(window);
   }
 
  private:
@@ -594,24 +605,15 @@ int main(int argc, char *argv[]) {
   parser->SetVerbose(false);
   parser->parse();
 
-//  list_view->render();
-//  std::thread parse_thread([](
-//      std::shared_ptr<CallgrindParser> parser,
-//      std::shared_ptr<ListView> entries_view
-//      ) {
-//    parser->parse();
-//    entries_view->render();
-//  }, parser, list_view);
-//  parse_thread.detach();
-//
 
-//list_view->render();
   tree_view->render();
 
-  int ch;
-  while ((ch = getch()) != KEY_F(10)) {
+  int ch = 1;
+  while (true) {
 //    list_view->dispatch(ch);
-    tree_view->dispatch(ch);
+    if (0!=tree_view->dispatch(ch)) {
+      break;
+    }
   }
 
 //  list_view->destroy();
