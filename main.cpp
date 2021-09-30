@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cassert>
 #include <ncurses.h>
+#include <form.h>
 #include <thread>
 #include <algorithm>
 #include <mutex>
@@ -285,7 +286,7 @@ struct TreeView {
     } else if (
         getmaxx(window) != COLS - 1 ||
             getmaxy(window) != LINES - 1) {
-      delwin(window);
+      destroy();
       window = newwin(height, width, 1, 1);
       keypad(window, true);
     } else {
@@ -297,10 +298,8 @@ struct TreeView {
     init_pair(2, COLOR_BLACK, COLOR_WHITE);
 
     wclear(window);
-    box(window, 0, 0);
 
-    auto actual_width = width - 2;
-    auto actual_height = height - 1;
+
 
     if (!nodes_initialized) {
       initNodes();
@@ -311,6 +310,12 @@ struct TreeView {
       nodes[selected_inode]->is_selected = true;
       nodes_initialized = true;
     }
+
+    renderSearchForm();
+    box(window, 0, 0);
+
+    auto actual_width = width - 2;
+    auto actual_height = height - (search_activated? 2 : 1);
 
     if (selected_inode - offset_inode >= actual_height - 2) {
       offset_inode = selected_inode - (actual_height - 2);
@@ -328,8 +333,9 @@ struct TreeView {
 
       line_text << node.render_string(0, 0);
 
-      auto text = line_text.str();
       auto left_offset = 1 + 2 * node.level;
+      auto text_width = actual_width - left_offset - 1 - bullet_symbol.length();
+      auto text = line_text.str().substr(0, text_width);
       mvwprintw(window, iline, left_offset, "%s", bullet_symbol.c_str());
       if (node.is_selected) {
         wattron(window, COLOR_PAIR(2));
@@ -343,7 +349,31 @@ struct TreeView {
   }
 
   int dispatch(int) {
-    auto ch= wgetch(window);
+    int ch = wgetch(window);
+    if (search_activated) {
+      switch (ch) {
+        case KEY_LEFT:
+          form_driver(search_form, REQ_PREV_CHAR);
+          break;
+        case KEY_RIGHT:
+          form_driver(search_form, REQ_NEXT_CHAR);
+          break;
+        case 127:
+        case '\b':
+        case KEY_BACKSPACE:
+          form_driver(search_form, REQ_DEL_PREV);
+          break;
+        case '\n':
+        case KEY_ENTER:
+          /* populate search results */
+        case 27 /*ESCAPE */:
+          search_activated = false;
+          render();
+          break;
+        default: form_driver(search_form, ch);
+      }
+      return 0;
+    }
     switch (ch) {
       case 'e':
       case 'l':
@@ -364,14 +394,26 @@ struct TreeView {
         break;
       case 'c':toggleCostsView();
         break;
-      case KEY_F(10):
-        return -1;
+      case '/':
+        search_activated = true;
+        render();
+        break;
+      case KEY_F(10):return -1;
       default:;
     }
     return 0;
   }
 
   void destroy() {
+    if (search_form) {
+      unpost_form(search_form);
+      free_form(search_form);
+      search_form = nullptr;
+      for (auto field_ptr: search_fields) {
+        free_field(field_ptr);
+      }
+      search_fields.clear();
+    }
     if (window)
       delwin(window);
   }
@@ -412,7 +454,7 @@ struct TreeView {
   }
 
   TreeNodePtr
-  makeCallNode(const CallgrindParser::EntryPtr& parent, const CallgrindParser::Call &call) {
+  makeCallNode(const CallgrindParser::EntryPtr &parent, const CallgrindParser::Call &call) {
 
     auto new_node = std::make_shared<TreeNode>();
     new_node->expandable = true;
@@ -423,7 +465,8 @@ struct TreeView {
       if (costs_view == kAbsolute) {
         text_stream << "[Ir=" << std::setprecision(2) << double(call.totalCosts()[0]) << "] ";
       } else {
-        text_stream << "[" << std::setprecision(2) << 100*double(call.totalCosts()[0])/parent->totalCost()[0] << "%] ";
+        text_stream << "[" << std::setprecision(2) << 100 * double(call.totalCosts()[0]) / parent->totalCost()[0]
+                    << "%] ";
       }
 
       if (name_view == kSymbolOnly) {
@@ -467,7 +510,7 @@ struct TreeView {
         text_stream << "[" << std::setw(7) << std::setprecision(2) << double(entry->totalCost()[0]) << "] ";
       } else if (costs_view == kPersentage) {
         text_stream << "[" << std::setw(7) << std::setprecision(2)
-        << 100*double(entry->totalCost()[0]) / parser->getEntries()[0]->totalCost()[0] << "%] ";
+                    << 100 * double(entry->totalCost()[0]) / parser->getEntries()[0]->totalCost()[0] << "%] ";
       }
 
       if (name_view == kSymbolOnly) {
@@ -493,7 +536,7 @@ struct TreeView {
         return lhs.totalCosts()[0] > rhs.totalCosts()[0];
       });
       for (auto &call : calls) {
-        new_node->children.emplace_back(makeCallNode(entry,call));
+        new_node->children.emplace_back(makeCallNode(entry, call));
       }
     };
     return new_node;
@@ -561,6 +604,28 @@ struct TreeView {
     render();
   }
 
+  void renderSearchForm() {
+    if (!search_form) {
+      search_fields = {
+          new_field(1 /* height */, getmaxx(window) - 11 - 2 /* width */,
+                    getmaxy(window) - 2 /* startpos y */, 11 /* startposx */,
+                    0, 0),
+          nullptr
+      };
+      search_form = new_form(search_fields.data());
+      set_form_sub(search_form, window);
+    }
+
+    if (search_activated) {
+      post_form(search_form);
+
+      init_pair(12, COLOR_YELLOW, COLOR_BLACK);
+      wattron(window, COLOR_PAIR(12));
+      mvwprintw(window, getmaxy(window) - 2, 1, "Search: ");
+      wattroff(window, COLOR_PAIR(12));
+    }
+  }
+
   ENameView name_view{kSymbolOnly};
   CostsView costs_view{kAbsolute};
   long selected_inode{0};
@@ -571,6 +636,11 @@ struct TreeView {
 
   bool nodes_initialized{false};
   std::vector<std::shared_ptr<TreeNode>> nodes;
+
+  bool search_activated{false};
+  std::vector<FIELD *> search_fields;
+  FORM *search_form{nullptr};
+
 };
 
 int main(int argc, char *argv[]) {
@@ -605,13 +675,12 @@ int main(int argc, char *argv[]) {
   parser->SetVerbose(false);
   parser->parse();
 
-
   tree_view->render();
 
   int ch = 1;
   while (true) {
 //    list_view->dispatch(ch);
-    if (0!=tree_view->dispatch(ch)) {
+    if (0 != tree_view->dispatch(ch)) {
       break;
     }
   }
