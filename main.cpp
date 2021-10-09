@@ -458,7 +458,7 @@ struct TreeView {
   }
 
   TreeNodePtr
-  makeCallerNode(const CallgrindParser::Entry* caller) {
+  makeCallerNode(const CallgrindParser::EntryPtr& caller) {
 
     auto new_node = std::make_shared<TreeNode>();
     new_node->expandable = false;
@@ -560,7 +560,7 @@ struct TreeView {
       new_node->children.clear();
       auto callers = entry->callers;
       for (auto caller : callers) {
-        new_node->children.emplace_back(makeCallerNode(caller));
+        new_node->children.emplace_back(makeCallerNode(caller.lock()));
       }
       auto calls = entry->calls;
       std::sort(begin(calls), end(calls), [](const CallgrindParser::Call &lhs, const CallgrindParser::Call &rhs) {
