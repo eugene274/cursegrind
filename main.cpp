@@ -47,6 +47,7 @@ struct ListView {
 
     init_pair(1, COLOR_WHITE, COLOR_BLACK);
     init_pair(2, COLOR_BLACK, COLOR_WHITE);
+    init_pair(3, COLOR_BLACK, COLOR_YELLOW);
 
     wclear(window);
     box(window, 0, 0);
@@ -70,7 +71,8 @@ struct ListView {
         auto entry_cost = entry->totalCost()[0];
         if (iline == selected_line) {
           wattron(window, COLOR_PAIR(2));
-        } else {
+        }
+        else {
           wattron(window, COLOR_PAIR(1));
         }
 
@@ -262,6 +264,7 @@ struct TreeView {
 
     bool is_expanded{false};
     bool is_selected{false};
+    bool is_highlighted{false};
   };
 
   using TreeNodePtr = std::shared_ptr<TreeNode>;
@@ -296,10 +299,9 @@ struct TreeView {
 
     init_pair(1, COLOR_WHITE, COLOR_BLACK);
     init_pair(2, COLOR_BLACK, COLOR_WHITE);
+    init_pair(3, COLOR_BLACK, COLOR_YELLOW);
 
     wclear(window);
-
-
 
     if (!nodes_initialized) {
       initNodes();
@@ -315,7 +317,7 @@ struct TreeView {
     box(window, 0, 0);
 
     auto actual_width = width - 2;
-    auto actual_height = height - (search_activated? 2 : 1);
+    auto actual_height = height - (search_activated ? 2 : 1);
 
     if (selected_inode - offset_inode >= actual_height - 2) {
       offset_inode = selected_inode - (actual_height - 2);
@@ -339,6 +341,8 @@ struct TreeView {
       mvwprintw(window, iline, left_offset, "%s", bullet_symbol.c_str());
       if (node.is_selected) {
         wattron(window, COLOR_PAIR(2));
+      } else if (node.is_highlighted) {
+        wattron(window, COLOR_PAIR(3));
       }
       mvwprintw(window, iline, left_offset + 1 + bullet_symbol.length(), "%s", text.c_str());
       wattron(window, COLOR_PAIR(1));
@@ -352,23 +356,25 @@ struct TreeView {
     int ch = wgetch(window);
     if (search_activated) {
       switch (ch) {
-        case KEY_LEFT:
-          form_driver(search_form, REQ_PREV_CHAR);
+        case KEY_LEFT:form_driver(search_form, REQ_PREV_CHAR);
           break;
-        case KEY_RIGHT:
-          form_driver(search_form, REQ_NEXT_CHAR);
+        case KEY_RIGHT:form_driver(search_form, REQ_NEXT_CHAR);
           break;
         case 127:
         case '\b':
-        case KEY_BACKSPACE:
-          form_driver(search_form, REQ_DEL_PREV);
+        case KEY_BACKSPACE:form_driver(search_form, REQ_DEL_PREV);
           break;
         case '\n':
-        case KEY_ENTER:
+        case KEY_ENTER:form_driver(search_form, REQ_VALIDATION);
           /* populate search results */
+          doSearch();
         case 27 /*ESCAPE */:
+          /* cancel search */
           search_activated = false;
+          form_driver(search_form, REQ_CLR_FIELD);
           render();
+          break;
+        case KEY_F(10):return -1;
           break;
         default: form_driver(search_form, ch);
       }
@@ -383,8 +389,7 @@ struct TreeView {
       case KEY_LEFT:collapse_selected();
         break;
       case 'j':
-      case KEY_DOWN:
-      case 'n':nextSelectable();
+      case KEY_DOWN: nextSelectable();
         break;
       case 'k':
       case KEY_UP:
@@ -394,8 +399,7 @@ struct TreeView {
         break;
       case 'c':toggleCostsView();
         break;
-      case '/':
-        search_activated = true;
+      case '/':search_activated = true;
         render();
         break;
       case KEY_F(10):return -1;
@@ -609,7 +613,7 @@ struct TreeView {
       search_fields = {
           new_field(1 /* height */, getmaxx(window) - 11 - 2 /* width */,
                     getmaxy(window) - 2 /* startpos y */, 11 /* startposx */,
-                    0, 0),
+                    0, 1),
           nullptr
       };
       search_form = new_form(search_fields.data());
@@ -624,6 +628,44 @@ struct TreeView {
       mvwprintw(window, getmaxy(window) - 2, 1, "Search: ");
       wattroff(window, COLOR_PAIR(12));
     }
+  }
+
+  void resetHighlights() {
+    for (auto &node_ptr : nodes) {
+      node_ptr->is_highlighted = false;
+    }
+  }
+
+  void doSearch() {
+    auto buffer_begin = field_buffer(search_fields[0], 0);
+    auto buffer_length = strlen(buffer_begin);
+    auto buffer_end = buffer_begin + buffer_length;
+
+    while (std::isspace(*buffer_begin)) buffer_begin++;
+    while (buffer_end > buffer_begin && std::isspace(*(buffer_end - 1))) buffer_end--;
+
+    std::string search_string{ buffer_begin, buffer_end};
+
+    resetHighlights();
+    if (search_string.empty()) {
+      return;
+    }
+    for (auto& node_ptr : nodes) {
+      if (node_ptr->render_string(0, 0).find(search_string, 0) != std::string::npos) {
+        node_ptr->is_highlighted = true;
+      }
+    }
+
+    /* move selector to the first highlighted entry */
+    auto first_highlighted = std::find_if(begin(nodes), end(nodes), [] (const TreeNodePtr &node) {
+      return node->is_highlighted;
+    });
+    if (first_highlighted != end(nodes)) {
+      nodes[selected_inode]->is_selected = false;
+      selected_inode = std::distance(begin(nodes), first_highlighted);
+      nodes[selected_inode]->is_selected = true;
+    }
+
   }
 
   ENameView name_view{kSymbolOnly};
