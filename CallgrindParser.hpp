@@ -114,6 +114,7 @@ class CallgrindParser {
     std::shared_ptr<Position> position{nullptr};
     std::vector<CostSpec> costs;
     std::vector<Call> calls;
+    std::vector<Entry*> callers;
 
     void addCost(const CostSpec &spec) { costs.emplace_back(spec); }
     void addCall(Call &&call) { calls.emplace_back(call); }
@@ -292,6 +293,10 @@ class CallgrindParser {
         for (auto &entry2 : entries_) {
           if (*(entry1_call.entry->position) == *(entry2->position)) {
             entry1_call.entry = entry2;
+            auto this_caller = std::find(begin(entry2->callers), end(entry2->callers), entry1.get());
+            if (this_caller == end(entry2->callers)) {
+              entry2->callers.push_back(entry1.get());
+            }
             break;
           }
         }

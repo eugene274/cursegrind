@@ -458,6 +458,29 @@ struct TreeView {
   }
 
   TreeNodePtr
+  makeCallerNode(const CallgrindParser::Entry* caller) {
+
+    auto new_node = std::make_shared<TreeNode>();
+    new_node->expandable = false;
+    new_node->selectable = false;
+    new_node->render_string = [this, caller, new_node](int, int) {
+      std::stringstream text_stream;
+      text_stream << "< "; // add n-called and stats
+
+      if (name_view == kSymbolOnly) {
+        text_stream << caller->position->symbol;
+      } else if (name_view == kFileSymbol) {
+        text_stream << short_path(caller->position->source) << ":::" << caller->position->symbol;
+      } else if (name_view == kObjectSymbol) {
+        text_stream << short_path(caller->position->binary) << ":::" << caller->position->symbol;
+      }
+      return text_stream.str();
+    };
+
+    return new_node;
+  }
+
+  TreeNodePtr
   makeCallNode(const CallgrindParser::EntryPtr &parent, const CallgrindParser::Call &call) {
 
     auto new_node = std::make_shared<TreeNode>();
@@ -465,7 +488,7 @@ struct TreeView {
     new_node->selectable = true;
     new_node->render_string = [this, parent, new_node, call](int, int) {
       std::stringstream text_stream;
-      text_stream << "[calls=" << std::setprecision(2) << double(call.ncalls) << "] ";
+      text_stream << "> [calls=" << std::setprecision(2) << double(call.ncalls) << "] ";
       if (costs_view == kAbsolute) {
         text_stream << "[Ir=" << std::setprecision(2) << double(call.totalCosts()[0]) << "] ";
       } else {
@@ -535,6 +558,10 @@ struct TreeView {
 
     new_node->on_expand = [this, entry, new_node]() {
       new_node->children.clear();
+      auto callers = entry->callers;
+      for (auto caller : callers) {
+        new_node->children.emplace_back(makeCallerNode(caller));
+      }
       auto calls = entry->calls;
       std::sort(begin(calls), end(calls), [](const CallgrindParser::Call &lhs, const CallgrindParser::Call &rhs) {
         return lhs.totalCosts()[0] > rhs.totalCosts()[0];
