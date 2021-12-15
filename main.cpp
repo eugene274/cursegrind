@@ -242,6 +242,40 @@ struct ListView {
   int lastline{1};
 };
 
+struct ItemView {
+
+  ~ItemView() {
+    if (window) {
+      delwin(window);
+      window = nullptr;
+    }
+  }
+  void render() {
+    auto height = 5;
+    auto width = COLS - 1;
+
+    if (!window) {
+      window = newwin(height, width, LINES - 5, 1);
+      keypad(window, true);
+    } else {
+      height = getmaxy(window);
+      width = getmaxx(window);
+    }
+
+    wclear(window);
+    box(window, 0, 0);
+    mvwprintw(window, 1, 1, "%s", message.c_str());
+
+    wrefresh(window);
+
+
+
+  }
+
+  std::string message;
+  WINDOW *window{nullptr};
+};
+
 struct TreeView {
 
   enum CostsView {
@@ -280,7 +314,7 @@ struct TreeView {
     static std::string collapse_symbol = "[-]";
     static std::string nonexpandable_symbol = " * ";
 
-    auto height = LINES - 1;
+    auto height = LINES - 6;
     auto width = COLS - 1;
 
     if (!window) {
@@ -349,7 +383,7 @@ struct TreeView {
     }
 
     wrefresh(window);
-
+    setMessage(nodes[selected_inode]->render_string(0, 0));
   }
 
   int dispatch(int) {
@@ -420,6 +454,10 @@ struct TreeView {
     }
     if (window)
       delwin(window);
+  }
+
+  void SetItemView(const std::shared_ptr<ItemView> &item_view) {
+    TreeView::item_view = item_view;
   }
 
  private:
@@ -559,7 +597,7 @@ struct TreeView {
     new_node->on_expand = [this, entry, new_node]() {
       new_node->children.clear();
       auto callers = entry->callers;
-      for (auto caller : callers) {
+      for (const auto& caller : callers) {
         new_node->children.emplace_back(makeCallerNode(caller.lock()));
       }
       auto calls = entry->calls;
@@ -685,14 +723,20 @@ struct TreeView {
 
     /* move selector to the first highlighted entry */
     auto first_highlighted = std::find_if(begin(nodes), end(nodes), [] (const TreeNodePtr &node) {
-      return node->is_highlighted;
+      return node->is_highlighted && node->selectable;
     });
     if (first_highlighted != end(nodes)) {
       nodes[selected_inode]->is_selected = false;
       selected_inode = std::distance(begin(nodes), first_highlighted);
       nodes[selected_inode]->is_selected = true;
     }
+  }
 
+  void setMessage(const std::string &message) const {
+    if (item_view) {
+      item_view->message = message;
+      item_view->render();
+    }
   }
 
   ENameView name_view{kSymbolOnly};
@@ -710,6 +754,7 @@ struct TreeView {
   std::vector<FIELD *> search_fields;
   FORM *search_form{nullptr};
 
+  std::shared_ptr<ItemView> item_view;
 };
 
 int main(int argc, char *argv[]) {
@@ -739,12 +784,15 @@ int main(int argc, char *argv[]) {
   refresh();
 
   auto parser = std::make_shared<CallgrindParser>(file_to_process);
-  auto list_view = std::make_shared<ListView>(parser);
+//  auto list_view = std::make_shared<ListView>(parser);
   auto tree_view = std::make_shared<TreeView>(parser);
+  auto item_view = std::make_shared<ItemView>();
+  tree_view->SetItemView(item_view);
   parser->SetVerbose(false);
   parser->parse();
 
   tree_view->render();
+  item_view->render();
 
   int ch = 1;
   while (true) {
