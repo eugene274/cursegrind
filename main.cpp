@@ -1,3 +1,22 @@
+/*
+ *     calcurse - lightweight viewer of the callgrind tool of Valgrind
+ *     Copyright (C) 2021  Evgeny Kashirin
+ *     Contact: kashirin.e(a)list.ru
+ *
+ *     This program is free software: you can redistribute it and/or modify
+ *     it under the terms of the GNU General Public License as published by
+ *     the Free Software Foundation, either version 3 of the License, or
+ *     (at your option) any later version.
+ *
+ *     This program is distributed in the hope that it will be useful,
+ *     but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *     GNU General Public License for more details.
+ *
+ *     You should have received a copy of the GNU General Public License
+ *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include <iostream>
 #include <cassert>
 #include <ncurses.h>
@@ -71,8 +90,7 @@ struct ListView {
         auto entry_cost = entry->totalCost()[0];
         if (iline == selected_line) {
           wattron(window, COLOR_PAIR(2));
-        }
-        else {
+        } else {
           wattron(window, COLOR_PAIR(1));
         }
 
@@ -267,8 +285,6 @@ struct ItemView {
     mvwprintw(window, 1, 1, "%s", message.c_str());
 
     wrefresh(window);
-
-
 
   }
 
@@ -496,7 +512,7 @@ struct TreeView {
   }
 
   TreeNodePtr
-  makeCallerNode(const CallgrindParser::EntryPtr& caller) {
+  makeCallerNode(const CallgrindParser::EntryPtr &caller) {
 
     auto new_node = std::make_shared<TreeNode>();
     new_node->expandable = false;
@@ -597,7 +613,7 @@ struct TreeView {
     new_node->on_expand = [this, entry, new_node]() {
       new_node->children.clear();
       auto callers = entry->callers;
-      for (const auto& caller : callers) {
+      for (const auto &caller : callers) {
         new_node->children.emplace_back(makeCallerNode(caller.lock()));
       }
       auto calls = entry->calls;
@@ -709,20 +725,20 @@ struct TreeView {
     while (std::isspace(*buffer_begin)) buffer_begin++;
     while (buffer_end > buffer_begin && std::isspace(*(buffer_end - 1))) buffer_end--;
 
-    std::string search_string{ buffer_begin, buffer_end};
+    std::string search_string{buffer_begin, buffer_end};
 
     resetHighlights();
     if (search_string.empty()) {
       return;
     }
-    for (auto& node_ptr : nodes) {
+    for (auto &node_ptr : nodes) {
       if (node_ptr->render_string(0, 0).find(search_string, 0) != std::string::npos) {
         node_ptr->is_highlighted = true;
       }
     }
 
     /* move selector to the first highlighted entry */
-    auto first_highlighted = std::find_if(begin(nodes), end(nodes), [] (const TreeNodePtr &node) {
+    auto first_highlighted = std::find_if(begin(nodes), end(nodes), [](const TreeNodePtr &node) {
       return node->is_highlighted && node->selectable;
     });
     if (first_highlighted != end(nodes)) {
