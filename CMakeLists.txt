@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.20)
-project(cursegrind)
+cmake_minimum_required(VERSION 3.11)
+project(cursegrind VERSION 0.0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -19,6 +19,16 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         ${BOOST_LIBRARIES}
 #        Threads::Threads
         )
+
+install(TARGETS ${PROJECT_NAME}
+        EXPORT ${PROJECT_NAME}Targets
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib
+        RUNTIME DESTINATION bin
+        INCLUDES DESTINATION include
+        )
+
+
 
 if (${PROJECT_NAME}_BUILD_TESTS)
     include(FetchContent)
