@@ -332,9 +332,12 @@ struct TreeView {
       width = getmaxx(window);
     }
 
+    constexpr auto PAIR_SELECTED = 2;
+    constexpr auto PAIR_HIGHLIGHTED = 3;
+
     init_pair(1, COLOR_WHITE, COLOR_BLACK);
-    init_pair(2, COLOR_BLACK, COLOR_WHITE);
-    init_pair(3, COLOR_BLACK, COLOR_YELLOW);
+    init_pair(PAIR_SELECTED, COLOR_BLACK, COLOR_WHITE);
+    init_pair(PAIR_HIGHLIGHTED, COLOR_BLACK, COLOR_YELLOW);
 
     wclear(window);
 
@@ -376,9 +379,9 @@ struct TreeView {
       auto text = line_text.str().substr(0, text_width);
       mvwprintw(window, iline, left_offset, "%s", bullet_symbol.c_str());
       if (node.is_selected) {
-        wattron(window, COLOR_PAIR(2));
+        wattron(window, COLOR_PAIR(PAIR_SELECTED));
       } else if (node.is_highlighted) {
-        wattron(window, COLOR_PAIR(3));
+        wattron(window, COLOR_PAIR(PAIR_HIGHLIGHTED));
       }
       mvwprintw(window, iline, left_offset + 1 + bullet_symbol.length(), "%s",
                 text.c_str());

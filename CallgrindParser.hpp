@@ -1,3 +1,4 @@
+
 /*
  *     calcurse - lightweight viewer of the callgrind tool of Valgrind
  *     Copyright (C) 2021  Evgeny Kashirin
@@ -177,7 +178,7 @@ class CallgrindParser {
     static const std::regex re_positions_def(
         "^positions:\\s+(instr|line\\s*)+$");
 
-    static const std::regex re_events_def(R "(^events:\s+(\w+\s*)+$)");
+    static const std::regex re_events_def(R"(^events:\s+(\w+\s*)+$)");
 
     std::ifstream ifs(filename);
     std::string line;
@@ -368,9 +369,9 @@ class CallgrindParser {
     /* CostPosition := "ob" | "fl" | "fi" | "fe" | "fn" */
     /* CalledPosition := " "cob" | "cfi" | "cfl" | "cfn" */
     static const std::vector<std::regex> re_map{
-        std::regex(R "(^(ob|fl|fi|fe|fn)=[ \t]*(\(\d+\))?[ \t]*(.*)$)"),
-        std::regex(R "(^c(ob|fl|fi|fn)=[ \t]*(\(\d+\))?[ \t]*(.*)$)"),
-        std::regex(R "(^(fi|fe)=[ \t]*(\(\d+\))?[ \t]*(.*)$)")};
+        std::regex(R"(^(ob|fl|fi|fe|fn)=[ \t]*(\(\d+\))?[ \t]*(.*)$)"),
+        std::regex(R"(^c(ob|fl|fi|fn)=[ \t]*(\(\d+\))?[ \t]*(.*)$)"),
+        std::regex(R"(^(fi|fe)=[ \t]*(\(\d+\))?[ \t]*(.*)$)")};
     auto &re_position_spec = re_map[size_t(position_type)];
 
     std::smatch match_results;
@@ -431,7 +432,7 @@ class CallgrindParser {
   std::optional<CostSpec> parseCostLine(const std::string &costs_line) {
     static const std::regex re_space("\\s+");
     static const std::regex re_number(
-        R "(^(\*|[+-]\d+|0[xX][0-9a-fA-F]+|\d+)+$)");
+        R"(^(\*|[+-]\d+|0[xX][0-9a-fA-F]+|\d+)+$)");
     for (auto it = std::sregex_token_iterator(begin(costs_line),
                                               end(costs_line), re_space, -1);
          it != std::sregex_token_iterator(); ++it) {
@@ -470,7 +471,7 @@ class CallgrindParser {
 
   std::optional<CallSpec> parseCallLine(const std::string &line) {
     /* CallLine := "calls=" Space* Number Space+ SubPositionList */
-    static const std::regex re_call_line(R "(^calls=\s*(.+)\s+(.+))");
+    static const std::regex re_call_line(R"(^calls=\s*(.+)\s+(.+))");
 
     std::smatch match_results;
     if (std::regex_search(line, match_results, re_call_line)) {
