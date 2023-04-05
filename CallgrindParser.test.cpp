@@ -18,21 +18,20 @@
  */
 
 #include "CallgrindParser.hpp"
+
 #include <gtest/gtest.h>
 
-TEST (CallgrindParser, Basics)
-{
-  CallgrindParser parser ("callgrind.out.18859");
-  parser.SetVerbose (false);
-  parser.parse ();
-  parser.Summary ();
+TEST(CallgrindParser, Basics) {
+  CallgrindParser parser("callgrind.out.18859");
+  parser.SetVerbose(false);
+  parser.parse();
+  parser.Summary();
   std::cout << "Done" << std::endl;
 }
 
-TEST (CallgrindParser, Empty)
-{
-  CallgrindParser parser ("empty.out");
-  parser.SetVerbose (false);
-  parser.parse ();
-  parser.Summary ();
+TEST(CallgrindParser, Empty) {
+  CallgrindParser parser("empty.out");
+  parser.SetVerbose(false);
+  parser.parse();
+  parser.Summary();
 }
