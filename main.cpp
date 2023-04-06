@@ -24,6 +24,7 @@
 #include <cassert>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -36,34 +37,38 @@ std::string short_path(const std::string &f) {
   return p.filename();
 }
 
-struct ItemView {
-  ~ItemView() {
+struct WindowDeleter {
+  void operator()(WINDOW *window) {
     if (window) {
       delwin(window);
-      window = nullptr;
     }
   }
+};
+
+using UniqueWinPtr = std::unique_ptr<WINDOW, WindowDeleter>;
+
+struct ItemView {
   void render() {
     auto height = 5;
     auto width = COLS - 1;
 
     if (!window) {
-      window = newwin(height, width, LINES - 5, 1);
-      keypad(window, true);
+      window = UniqueWinPtr(newwin(height, width, LINES - 5, 1));
+      keypad(window.get(), true);
     } else {
-      height = getmaxy(window);
-      width = getmaxx(window);
+      height = getmaxy(window.get());
+      width = getmaxx(window.get());
     }
 
-    wclear(window);
-    box(window, 0, 0);
-    mvwprintw(window, 1, 1, "%s", message.c_str());
+    wclear(window.get());
+    box(window.get(), 0, 0);
+    mvwprintw(window.get(), 1, 1, "%s", message.c_str());
 
-    wrefresh(window);
+    wrefresh(window.get());
   }
 
   std::string message;
-  WINDOW *window{nullptr};
+  UniqueWinPtr window{nullptr};
 };
 
 struct TreeView {
