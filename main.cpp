@@ -195,7 +195,6 @@ struct TreeView {
           form_driver(search_form, REQ_CLR_FIELD);
           render();
           break;
-        case 'q':
         case KEY_F(10):
           return -1;
           break;
