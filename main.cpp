@@ -418,6 +418,7 @@ struct TreeView {
           form_driver(search_form, REQ_CLR_FIELD);
           render();
           break;
+        case 'q':
         case KEY_F(10):
           return -1;
           break;
@@ -455,6 +456,7 @@ struct TreeView {
         search_activated = true;
         render();
         break;
+      case 'q':
       case KEY_F(10):
         return -1;
       default:;
@@ -813,7 +815,7 @@ int main(int argc, char *argv[]) {
 
   noecho();
 
-  printw("Press F10 to exit");
+  printw("Press 'q' or F10 to exit");
   refresh();
 
   auto parser = std::make_shared<CallgrindParser>(file_to_process);

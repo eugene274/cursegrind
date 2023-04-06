@@ -32,7 +32,7 @@ $ make && make install
 - `/` - activate search panel
 - `c` - toggle costs view (Ir/Percentage from total)
 - `v` - toggle symbol / filename::symbol / object::symbol representations
-- `F10` - exit
+- `F10` or `q` - exit
 
 
 
