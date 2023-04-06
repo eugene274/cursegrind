@@ -36,229 +36,6 @@ std::string short_path(const std::string &f) {
   return p.filename();
 }
 
-struct ListView {
-  explicit ListView(std::shared_ptr<CallgrindParser> parser)
-      : parser(std::move(parser)) {}
-  ~ListView() { delwin(window); }
-
- public:
-  enum NameViewMode { kObject, kFilename };
-  enum CostViewMode { kRelative, kAbsolute };
-
-  void destroy() { delwin(window); }
-
-  void render() {
-    render_lock.lock();
-    auto height = LINES - 1;
-    auto width = COLS - 1;
-    if (!window) {
-      window = newwin(height, width, 1, 1);
-    } else {
-      height = getmaxy(window);
-      width = getmaxx(window);
-    }
-
-    init_pair(1, COLOR_WHITE, COLOR_BLACK);
-    init_pair(2, COLOR_BLACK, COLOR_WHITE);
-    init_pair(3, COLOR_BLACK, COLOR_YELLOW);
-
-    wclear(window);
-    box(window, 0, 0);
-
-    auto actual_width = width - 2;
-    const auto nlines = getNumberOfLines();
-
-    if (!parser || parser->getEntries().empty()) {
-      wrefresh(window);
-      render_lock.unlock();
-      return;
-    }
-
-    auto &entries = parser->getEntries();
-
-    int ientry = entry_offset;
-    auto max_cost = entries[0]->totalCost()[0];
-    for (int iline = 1; iline <= nlines; ++iline) {
-      if (ientry < entries.size()) {
-        const auto &entry = entries.at(ientry);
-        auto entry_cost = entry->totalCost()[0];
-        if (iline == selected_line) {
-          wattron(window, COLOR_PAIR(2));
-        } else {
-          wattron(window, COLOR_PAIR(1));
-        }
-
-        std::string position = name_repr == kObject ? entry->position->binary
-                                                    : entry->position->source;
-        std::string function = entry->position->symbol;
-        std::string delim = " : ";
-
-        std::stringstream costs_stream;
-        if (costs_repr == kRelative) {
-          costs_stream << std::setw(10) << std::setprecision(2)
-                       << 100 * double(entry_cost) / max_cost << "%";
-        } else {
-          costs_stream << std::setw(10) << std::setprecision(4)
-                       << double(entry_cost);
-        }
-        std::string costs = costs_stream.str();
-
-        auto name = short_path(position) + "/" + function;
-        auto max_name_width = actual_width - delim.size() - costs.size();
-        if (name.size() > max_name_width) {
-          if (iline == selected_line) {
-            auto max_line_offset = name.size() - max_name_width;
-            if (selected_line_offset > max_line_offset) {
-              selected_line_offset = max_line_offset;
-            }
-            name = name.substr(selected_line_offset, max_name_width);
-            if (selected_line_offset < max_line_offset) {
-              name[name.length() - 1] = '>';
-            }
-          } else {
-            name = name.substr(0, actual_width - 3 - costs.size());
-            name[name.length() - 1] = '>';
-          }
-          if (iline == selected_line && selected_line_offset > 0) {
-            name[0] = '<';
-          }
-        }
-
-        mvwprintw(window, iline, 1, "%s%s%s", costs_stream.str().c_str(),
-                  delim.c_str(), name.c_str());
-        lastline = iline;
-      } else {
-        break;
-      }
-      ientry++;
-    }
-    wattron(window, COLOR_PAIR(1));
-    wrefresh(window);
-    render_lock.unlock();
-  }
-
-  void shiftSelection(int pos) {
-    selected_line += pos;
-    if (entry_offset + selected_line >= parser->getEntries().size()) {
-      selected_line = parser->getEntries().size() - entry_offset;
-    } else if (selected_line >= lastline) {
-      selected_line = lastline - 1;
-      if (entry_offset < parser->getEntries().size() - 1) entry_offset++;
-    } else if (selected_line < 1) {
-      selected_line = 1;
-      if (entry_offset > 0) entry_offset--;
-    }
-    selected_line_offset = 0;
-    render();
-  }
-
-  void shiftPage(int d) {
-    if (d > 0) {
-      if (entry_offset + getNumberOfLines() >= parser->getEntries().size()) {
-        /* do nothing */
-      } else {
-        entry_offset += getNumberOfLines();
-        if (entry_offset + selected_line >= parser->getEntries().size()) {
-          selected_line = parser->getEntries().size() - entry_offset;
-        }
-      }
-    } else if (d < 0) {
-      if (entry_offset - getNumberOfLines() < 0) {
-        entry_offset = 0;
-      } else {
-        entry_offset -= getNumberOfLines();
-      }
-    }
-    selected_line_offset = 0;
-    render();
-  }
-
-  void shiftSelectedLineOffset(int pos) {
-    if (pos < 0 && selected_line_offset < -pos) {
-      selected_line_offset = 0;
-    } else {
-      selected_line_offset += pos;
-    }
-    render();
-  }
-
-  void resetSelectedLineOffset() {
-    selected_line_offset = 0;
-    render();
-  }
-
-  void toggleNameRepr() {
-    if (name_repr == kObject)
-      name_repr = kFilename;
-    else
-      name_repr = kObject;
-    render();
-  }
-
-  void toggleCostsRepr() {
-    if (costs_repr == kRelative)
-      costs_repr = kAbsolute;
-    else
-      costs_repr = kRelative;
-    render();
-  }
-
-  int dispatch(int ch) {
-    switch (ch) {
-      case 'j':
-      case KEY_DOWN:
-        shiftSelection(1);
-        break;
-      case 'k':
-      case KEY_UP:
-        shiftSelection(-1);
-        break;
-      case 'l':
-      case KEY_RIGHT:
-        shiftSelectedLineOffset(1);
-        break;
-      case 'h':
-      case KEY_LEFT:
-        shiftSelectedLineOffset(-1);
-        break;
-      case '^':
-      case KEY_HOME:
-        resetSelectedLineOffset();
-        break;
-      case KEY_NPAGE:
-      case 'f':
-        shiftPage(1);
-        break;
-      case KEY_PPAGE:
-      case 'b':
-        shiftPage(-1);
-        break;
-      case 'F':
-        toggleNameRepr();
-        break;
-      case 'C':
-        toggleCostsRepr();
-        break;
-      default:;
-    }
-    return 0;
-  }
-
- private:
-  inline int getNumberOfLines() const { return getmaxy(window) - 2; }
-
-  std::mutex render_lock;
-  WINDOW *window{nullptr};
-  std::shared_ptr<CallgrindParser> parser{};
-
-  int name_repr{0};
-  int costs_repr{kRelative};
-  int entry_offset{0};
-  size_t selected_line_offset{0};
-  size_t selected_line{1};
-  int lastline{1};
-};
-
 struct ItemView {
   ~ItemView() {
     if (window) {
@@ -819,7 +596,6 @@ int main(int argc, char *argv[]) {
   refresh();
 
   auto parser = std::make_shared<CallgrindParser>(file_to_process);
-  //  auto list_view = std::make_shared<ListView>(parser);
   auto tree_view = std::make_shared<TreeView>(parser);
   auto item_view = std::make_shared<ItemView>();
   tree_view->SetItemView(item_view);
@@ -831,13 +607,11 @@ int main(int argc, char *argv[]) {
 
   int ch = 1;
   while (true) {
-    //    list_view->dispatch(ch);
     if (0 != tree_view->dispatch(ch)) {
       break;
     }
   }
 
-  //  list_view->destroy();
   tree_view->destroy();
   endwin(); /* End curses mode		  */
   return 0;
