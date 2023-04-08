@@ -125,12 +125,16 @@ struct TreeView {
 
     if (!nodes_initialized) {
       initNodes();
-      auto first_selectable_it = std::find_if(
-          begin(nodes), end(nodes),
-          [](TreeNodePtr &nodeptr) { return nodeptr->selectable; });
-      selected_inode = std::distance(begin(nodes), first_selectable_it);
       nodes_initialized = true;
     }
+    if (nodes.empty()) {
+        wrefresh(window);
+        return;
+    }
+    auto first_selectable_it = std::find_if(
+        begin(nodes), end(nodes),
+          [](TreeNodePtr &nodeptr) { return nodeptr->selectable; });
+      selected_inode = std::distance(begin(nodes), first_selectable_it);
 
     renderSearchForm();
     box(window, 0, 0);
