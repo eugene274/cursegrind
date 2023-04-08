@@ -136,16 +136,19 @@ struct TreeView {
     renderSearchForm();
     box(window, 0, 0);
 
-    auto actual_width = width - 2;
-    auto actual_height = height - (search_activated ? 2 : 1);
+    constexpr int BORDER_WIDTH = 1;
+    constexpr int LEVEL_OFFSET_WIDTH = 1;
 
-    if (selected_inode - offset_inode >= actual_height - 2) {
-      offset_inode = selected_inode - (actual_height - 2);
+    const auto frame_width = width - 2 * BORDER_WIDTH;
+    const auto frame_height = height - (search_activated ? 2 : 1);
+
+    if (selected_inode - offset_inode >= frame_height - 2) {
+      offset_inode = selected_inode - (frame_height - 2);
     } else if (selected_inode < offset_inode) {
       offset_inode = selected_inode;
     }
     size_t inode = offset_inode;
-    for (int iline = 1; iline < actual_height && inode < nodes.size();
+    for (int iline = 1; iline < frame_height && inode < nodes.size();
          ++iline, ++inode) {
       auto &node = *nodes[inode];
       std::stringstream line_text;
@@ -156,17 +159,18 @@ struct TreeView {
 
       line_text << node.render_string(0, 0);
 
-      auto left_offset = 1 + 2 * node.level;
-      auto text_width = actual_width - left_offset - 1 - bullet_symbol.length();
-      auto text = line_text.str().substr(0, text_width);
-      mvwprintw(window, iline, left_offset, "%s", bullet_symbol.c_str());
+      const auto padding_left = BORDER_WIDTH + LEVEL_OFFSET_WIDTH * node.level;
+      const auto padding_right = BORDER_WIDTH;
+      const auto text_offset = padding_left + bullet_symbol.length() + 1;
+      const auto text_length = frame_width - padding_right - text_offset;
+      auto text = line_text.str().substr(0, text_length);
+      mvwprintw(window, iline, padding_left, "%s", bullet_symbol.c_str());
       if (node.is_selected) {
         wattron(window, COLOR_PAIR(PAIR_SELECTED));
       } else if (node.is_highlighted) {
         wattron(window, COLOR_PAIR(PAIR_HIGHLIGHTED));
       }
-      mvwprintw(window, iline, left_offset + 1 + bullet_symbol.length(), "%s",
-                text.c_str());
+      mvwprintw(window, iline, text_offset, "%s", text.c_str());
       wattron(window, COLOR_PAIR(1));
     }
 
