@@ -24,6 +24,7 @@
 #include <cassert>
 #include <filesystem>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -84,7 +85,6 @@ struct TreeView {
     std::function<void()> on_expand;
 
     bool is_expanded{false};
-    bool is_selected{false};
     bool is_highlighted{false};
   };
 
@@ -95,9 +95,9 @@ struct TreeView {
   ~TreeView() { destroy(); }
 
   void render() {
-    static std::string expand_symbol = "[+]";
-    static std::string collapse_symbol = "[-]";
-    static std::string nonexpandable_symbol = " * ";
+    static std::string symbol_expand = "[+]";
+    static std::string symbol_collapse = "[-]";
+    static std::string symbol_nonexp = " * ";
 
     auto height = LINES - 6;
     auto width = COLS - 1;
@@ -129,7 +129,6 @@ struct TreeView {
           begin(nodes), end(nodes),
           [](TreeNodePtr &nodeptr) { return nodeptr->selectable; });
       selected_inode = std::distance(begin(nodes), first_selectable_it);
-      nodes[selected_inode]->is_selected = true;
       nodes_initialized = true;
     }
 
@@ -151,11 +150,12 @@ struct TreeView {
     for (int iline = 1; iline < frame_height && inode < nodes.size();
          ++iline, ++inode) {
       auto &node = *nodes[inode];
+      const auto is_selected = inode == selected_inode;
       std::stringstream line_text;
 
       std::string bullet_symbol =
-          node.expandable ? node.is_expanded ? collapse_symbol : expand_symbol
-                          : nonexpandable_symbol;
+          node.expandable ? node.is_expanded ? symbol_collapse : symbol_expand
+                          : symbol_nonexp;
 
       line_text << node.render_string(0, 0);
 
@@ -165,7 +165,7 @@ struct TreeView {
       const auto text_length = frame_width - padding_right - text_offset;
       auto text = line_text.str().substr(0, text_length);
       mvwprintw(window, iline, padding_left, "%s", bullet_symbol.c_str());
-      if (node.is_selected) {
+      if (is_selected) {
         wattron(window, COLOR_PAIR(PAIR_SELECTED));
       } else if (node.is_highlighted) {
         wattron(window, COLOR_PAIR(PAIR_HIGHLIGHTED));
@@ -287,17 +287,27 @@ struct TreeView {
 
   void collapse_selected() {
     auto current_node = nodes[selected_inode];
-    if (!current_node->is_expanded) /* already collapsed */
-      return;
-    current_node->is_expanded = false;
-    auto current_node_it = begin(nodes) + selected_inode;
-    auto collapse_begin = current_node_it + 1;
-    auto collapse_end = std::find_if(collapse_begin, end(nodes),
-                                     [&current_node](TreeNodePtr ptr) {
-                                       return current_node->level >= ptr->level;
-                                     });
-    nodes.erase(collapse_begin, collapse_end);
-    render();
+    if (current_node->is_expanded) {
+      current_node->is_expanded = false;
+      auto current_node_it = begin(nodes) + selected_inode;
+      auto collapse_begin = current_node_it + 1;
+      auto collapse_end = std::find_if(
+          collapse_begin, end(nodes), [&current_node](const TreeNodePtr &ptr) {
+            return current_node->level >= ptr->level;
+          });
+      nodes.erase(collapse_begin, collapse_end);
+      render();
+    } else if (current_node->level > 0) {
+      // collapse parent node
+      // search backwards level < current level
+      auto rit = std::make_reverse_iterator(begin(nodes) + selected_inode);
+      auto rend = std::make_reverse_iterator(begin(nodes));
+      auto rfound = std::find_if(rit, rend, [current_node] (const TreeNodePtr& node) {
+        return node->level < current_node->level;
+      });
+      selected_inode = std::distance(rfound, rend) - 1;
+      collapse_selected();
+    }
   }
 
   TreeNodePtr makeCallerNode(const CallgrindParser::EntryPtr &caller) {
@@ -444,9 +454,7 @@ struct TreeView {
     if (next_selectable_node_it == end(nodes)) {
       /* ignore */
     } else {
-      nodes[selected_inode]->is_selected = false;
       selected_inode = std::distance(begin(nodes), next_selectable_node_it);
-      nodes[selected_inode]->is_selected = true;
     }
     render();
   }
@@ -462,11 +470,9 @@ struct TreeView {
     if (prev_selectable_node_it == rend(nodes)) {
       /* ignore */
     } else {
-      nodes[selected_inode]->is_selected = false;
       selected_inode = nodes.size() -
                        std::distance(rbegin(nodes), prev_selectable_node_it) -
                        1;
-      nodes[selected_inode]->is_selected = true;
     }
 
     render();
@@ -547,9 +553,7 @@ struct TreeView {
           return node->is_highlighted && node->selectable;
         });
     if (first_highlighted != end(nodes)) {
-      nodes[selected_inode]->is_selected = false;
       selected_inode = std::distance(begin(nodes), first_highlighted);
-      nodes[selected_inode]->is_selected = true;
     }
   }
 
