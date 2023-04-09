@@ -468,16 +468,14 @@ struct TreeView {
     if (selected_inode == 0) {
       return;
     }
-    auto current_node_rit = rbegin(nodes) + (nodes.size() - 1 - selected_inode);
-    auto prev_selectable_node_it =
-        std::find_if(current_node_rit + 1, rend(nodes),
-                     [](const TreeNodePtr &n) { return n->selectable; });
-    if (prev_selectable_node_it == rend(nodes)) {
-      /* ignore */
+    auto rit = std::make_reverse_iterator(begin(nodes) + selected_inode) + 1;
+    auto rend = nodes.rend();
+    auto rfound = std::find_if(
+        rit, rend, [](const TreeNodePtr &n) { return n->selectable; });
+    if (rfound != rend) {
+      selected_inode = std::distance(rfound, rend);
     } else {
-      selected_inode = nodes.size() -
-                       std::distance(rbegin(nodes), prev_selectable_node_it) -
-                       1;
+      selected_inode = 0;
     }
 
     render();
