@@ -126,15 +126,15 @@ struct TreeView {
     if (!nodes_initialized) {
       initNodes();
       nodes_initialized = true;
-    }
-    if (nodes.empty()) {
+      if (nodes.empty()) {
         wrefresh(window);
         return;
-    }
-    auto first_selectable_it = std::find_if(
-        begin(nodes), end(nodes),
+      }
+      auto first_selectable_it = std::find_if(
+          begin(nodes), end(nodes),
           [](TreeNodePtr &nodeptr) { return nodeptr->selectable; });
       selected_inode = std::distance(begin(nodes), first_selectable_it);
+    }
 
     renderSearchForm();
     box(window, 0, 0);
@@ -306,9 +306,10 @@ struct TreeView {
       // search backwards level < current level
       auto rit = std::make_reverse_iterator(begin(nodes) + selected_inode);
       auto rend = std::make_reverse_iterator(begin(nodes));
-      auto rfound = std::find_if(rit, rend, [current_node] (const TreeNodePtr& node) {
-        return node->level < current_node->level;
-      });
+      auto rfound =
+          std::find_if(rit, rend, [current_node](const TreeNodePtr &node) {
+            return node->level < current_node->level;
+          });
       selected_inode = std::distance(rfound, rend) - 1;
       collapse_selected();
     }
