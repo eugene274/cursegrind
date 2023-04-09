@@ -217,27 +217,35 @@ struct TreeView {
       return 0;
     }
     switch (ch) {
+      case 'E':
+      case 'L':
       case 'e':
       case 'l':
       case KEY_RIGHT:
         expand_selected();
         break;
       case 'h':
+      case 'H':
       case KEY_LEFT:
         collapse_selected();
         break;
+      case 'J':
       case 'j':
       case KEY_DOWN:
         nextSelectable();
         break;
+      case 'K':
       case 'k':
       case KEY_UP:
+      case 'P':
       case 'p':
         prevSelectable();
         break;
+      case 'V':
       case 'v':
         toggleNameView();
         break;
+      case 'C':
       case 'c':
         toggleCostsView();
         break;
@@ -246,6 +254,7 @@ struct TreeView {
         render();
         break;
       case 'q':
+      case 'Q':
       case KEY_F(10):
         return -1;
       default:;
